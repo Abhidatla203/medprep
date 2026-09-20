@@ -3,21 +3,27 @@
 import { useMemo, useState } from "react";
 import { allQuestions, type Question, type QuestionType } from "@/app/data/questions";
 
-const TYPE_STYLES: Record<QuestionType, { label: string; card: string; chip: string }> = {
+const TYPE_STYLES: Record<
+  QuestionType,
+  { label: string; short: string; bar: string; chip: string }
+> = {
   essay: {
     label: "Essay · 10",
-    card: "bg-amber-50 border-amber-200",
-    chip: "bg-amber-100 text-amber-900",
+    short: "Essay",
+    bar: "bg-red-500",
+    chip: "bg-red-500/15 text-red-300 ring-1 ring-red-500/30",
   },
   "short-note": {
     label: "Short Note · 5",
-    card: "bg-sky-50 border-sky-200",
-    chip: "bg-sky-100 text-sky-900",
+    short: "Short Note",
+    bar: "bg-blue-500",
+    chip: "bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30",
   },
   "very-short": {
     label: "Very Short · 2",
-    card: "bg-emerald-50 border-emerald-200",
-    chip: "bg-emerald-100 text-emerald-900",
+    short: "Very Short",
+    bar: "bg-emerald-500",
+    chip: "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30",
   },
 };
 
@@ -73,22 +79,39 @@ export default function QuestionBankPage() {
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-slate-900">Pharmacology</h1>
-        <p className="text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold text-slate-100">Pharmacology</h1>
+        <p className="text-sm text-slate-400">
           {questions.length} questions · MBBS Year 2 · NTRUHS
         </p>
       </header>
 
-      <input
-        type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search questions, topics, or keywords…"
-        className="mb-4 w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm
-                   outline-none focus:border-slate-500"
-      />
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search questions, topics, or keywords…"
+          className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2.5
+                     text-sm text-slate-100 placeholder:text-slate-500
+                     outline-none focus:border-slate-500"
+        />
 
-      <div className="mb-3 flex flex-wrap gap-2">
+        <select
+          value={activeTopic}
+          onChange={(e) => setActiveTopic(e.target.value)}
+          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5
+                     text-sm text-slate-200 outline-none focus:border-slate-500 sm:w-64"
+        >
+          <option value="all">All topics</option>
+          {topics.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mb-6 flex flex-wrap gap-2">
         <FilterChip
           active={activeType === "all"}
           onClick={() => setActiveType("all")}
@@ -99,29 +122,17 @@ export default function QuestionBankPage() {
             key={t}
             active={activeType === t}
             onClick={() => setActiveType(t)}
-            label={`${TYPE_STYLES[t].label.split(" · ")[0]} · ${counts[t]}`}
+            label={`${TYPE_STYLES[t].short} · ${counts[t]}`}
           />
         ))}
       </div>
 
-      <div className="mb-6 flex flex-wrap gap-2">
-        <FilterChip
-          active={activeTopic === "all"}
-          onClick={() => setActiveTopic("all")}
-          label="All topics"
-        />
-        {topics.map((t) => (
-          <FilterChip
-            key={t}
-            active={activeTopic === t}
-            onClick={() => setActiveTopic(t)}
-            label={t}
-          />
-        ))}
-      </div>
+      <p className="mb-3 text-xs text-slate-500">
+        Showing {filtered.length} of {questions.length}
+      </p>
 
       {filtered.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-slate-300 py-12 text-center text-sm text-slate-500">
+        <p className="rounded-lg border border-dashed border-slate-700 py-12 text-center text-sm text-slate-500">
           No questions match those filters.
         </p>
       ) : (
@@ -154,8 +165,8 @@ function FilterChip({
       onClick={onClick}
       className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
         active
-          ? "bg-slate-900 text-white"
-          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          ? "bg-slate-100 text-slate-900"
+          : "bg-slate-800 text-slate-300 hover:bg-slate-700"
       }`}
     >
       {label}
@@ -175,56 +186,73 @@ function QuestionCard({
   const style = TYPE_STYLES[question.type];
 
   return (
-    <li className={`rounded-xl border p-4 transition ${style.card}`}>
-      <button onClick={onToggle} className="w-full text-left">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <span className={`rounded px-2 py-0.5 text-[11px] font-semibold ${style.chip}`}>
-            {style.label}
-          </span>
-          <span className="text-[11px] text-slate-500">{question.subtopic}</span>
-          {question.needsDiagram && (
-            <span className="rounded bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-800">
-              Diagram
+    <li className="relative overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60 transition hover:border-slate-700">
+      <span className={`absolute left-0 top-0 h-full w-[3px] ${style.bar}`} />
+
+      <div className="p-4 pl-5">
+        <button onClick={onToggle} className="w-full text-left">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className={`rounded px-2 py-0.5 text-[11px] font-semibold ${style.chip}`}>
+              {style.label}
             </span>
-          )}
-          {question.difficulty === "hard" && (
-            <span className="rounded bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-800">
-              Hard
-            </span>
-          )}
-        </div>
+            <span className="text-[11px] text-slate-500">{question.topic}</span>
+            <span className="text-[11px] text-slate-600">·</span>
+            <span className="text-[11px] text-slate-500">{question.subtopic}</span>
+            {question.needsDiagram && (
+              <span className="rounded bg-violet-500/15 px-2 py-0.5 text-[11px] font-medium text-violet-300 ring-1 ring-violet-500/30">
+                Diagram
+              </span>
+            )}
+          </div>
 
-        <p className="text-sm font-medium leading-relaxed text-slate-900">
-          {question.question}
-        </p>
-      </button>
-
-      {isOpen && (
-        <div className="mt-3 border-t border-black/5 pt-3">
-          {question.parts.length > 0 && (
-            <ol className="mb-3 list-decimal space-y-1 pl-5 text-sm text-slate-700">
-              {question.parts.map((p, i) => (
-                <li key={i}>{p}</li>
-              ))}
-            </ol>
-          )}
-
-          <p className="text-sm leading-relaxed text-slate-700">
-            {question.answer || "Answer not added yet."}
+          <p className="text-sm font-medium leading-relaxed text-slate-100">
+            {question.question}
           </p>
 
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {question.keywords.map((k) => (
-              <span
-                key={k}
-                className="rounded bg-white/70 px-2 py-0.5 text-[11px] text-slate-600"
-              >
-                {k}
-              </span>
-            ))}
+          <span className="mt-3 inline-block text-[11px] font-medium text-slate-400">
+            {isOpen ? "Hide answer guide ▲" : "Answer guide ▼"}
+          </span>
+        </button>
+
+        {isOpen && (
+          <div className="mt-3 border-t border-slate-800 pt-3">
+            {question.textbookRef ? (
+              <div className="inline-flex flex-wrap items-center gap-2 rounded-lg bg-slate-800/70 px-3 py-2 text-[12px] text-slate-300">
+                <span className="font-semibold text-slate-100">
+                  {question.textbookRef.book} {question.textbookRef.edition}
+                </span>
+                <span className="text-slate-500">·</span>
+                <span>{question.textbookRef.chapter}</span>
+                <span className="text-slate-500">·</span>
+                <span className="font-medium text-slate-100">
+                  p. {question.textbookRef.page}
+                </span>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">
+                Textbook reference not added yet.
+              </p>
+            )}
+
+            {question.answer && (
+              <p className="mt-3 text-sm leading-relaxed text-slate-300">
+                {question.answer}
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {question.keywords.map((k) => (
+                <span
+                  key={k}
+                  className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-400"
+                >
+                  {k}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </li>
   );
 }
