@@ -1,26 +1,425 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* =============================================================================
+   medprep — "Ink & Aurora"
+   -----------------------------------------------------------------------------
+   A design system, not a colour swap.
+
+   PRINCIPLES
+     1. Warm paper, not clinical grey. #FBFAF7 reads as considered; #F8FAFC
+        reads as a default.
+     2. Colour is SIGNAL. Indigo means "act on this." Emerald means "you're
+        fine." Nothing is coloured to be pretty.
+     3. Hairlines over shadows. A 1px border at low opacity separates surfaces
+        more cleanly than a blur, and stays crisp at any zoom.
+     4. Numbers are tabular everywhere. A percentage that shifts width as it
+        counts up looks broken.
+
+   NO AUTOMATIC DARK MODE. The prefers-color-scheme block is gone deliberately:
+   it made the app look different on two machines running identical code. If
+   dark mode returns it will be an explicit toggle with a full second palette.
+   ============================================================================= */
+
+@theme {
+  /* ---------------------------------------------------------------- surfaces */
+  --color-canvas:        #fbfaf7;   /* page — warm paper                       */
+  --color-surface:       #ffffff;   /* cards                                   */
+  --color-surface-sunk:  #f6f4f0;   /* inset fields, wells                     */
+  --color-surface-raised:#ffffff;   /* sheets, popovers                        */
+
+  /* ------------------------------------------------------------------- ink   */
+  --color-ink:           #17141f;   /* headings — near-black, violet cast      */
+  --color-ink-soft:      #4a4458;   /* body copy                               */
+  --color-ink-muted:     #7c7589;   /* secondary lines                         */
+  --color-ink-faint:     #a8a2b3;   /* labels, timestamps                      */
+
+  /* ----------------------------------------------------------------- lines   */
+  --color-line:          #ebe7e0;   /* default hairline                        */
+  --color-line-strong:   #ddd8cf;   /* hover, emphasis                         */
+
+  /* --------------------------------------------------------------- primary   */
+  --color-brand:         #5b4bd6;   /* indigo-violet — the one strong accent   */
+  --color-brand-hover:   #4c3dc4;
+  --color-brand-soft:    #efedfd;   /* tinted fill for chips and active states */
+  --color-brand-line:    #d9d4fa;
+  --color-brand-ink:     #3d2fa8;   /* readable brand text on soft fill        */
+
+  /* ---------------------------------------------------------------- accents  */
+  --color-aurora-1:      #6366f1;   /* indigo  */
+  --color-aurora-2:      #a855f7;   /* violet  */
+  --color-aurora-3:      #ec4899;   /* pink    */
+  --color-aurora-4:      #14b8a6;   /* teal    */
+
+  /* ------------------------------------------------- attendance safety bands */
+  --color-safe:          #0f9b6c;
+  --color-safe-soft:     #e6f7f0;
+  --color-safe-line:     #bfe9d8;
+
+  --color-watch:         #c2870b;
+  --color-watch-soft:    #fdf5e3;
+  --color-watch-line:    #f2e0b4;
+
+  --color-risk:          #dd6b20;
+  --color-risk-soft:     #fdf0e6;
+  --color-risk-line:     #f8d5b8;
+
+  --color-critical:      #d64550;
+  --color-critical-soft: #fdeef0;
+  --color-critical-line: #f7ccd1;
+
+  /* ------------------------------------------------- class category accents  */
+  --color-theory:        #4f6ef7;
+  --color-practical:     #0f9b6c;
+  --color-clinical:      #9333ea;
+
+  /* ------------------------------------------------------------------ type   */
+  --font-display: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
+  --font-sans:    var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono:    var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+
+  /* ----------------------------------------------------------------- radius  */
+  --radius-card:  1.25rem;
+  --radius-field: 0.875rem;
+  --radius-sheet: 1.75rem;
+  --radius-pill:  9999px;
+
+  /* ---------------------------------------------------------------- shadows  */
+  --shadow-card:  0 1px 2px rgba(23, 20, 31, 0.04),
+                  0 1px 3px rgba(23, 20, 31, 0.03);
+  --shadow-lift:  0 2px 4px rgba(23, 20, 31, 0.04),
+                  0 8px 20px -6px rgba(23, 20, 31, 0.10);
+  --shadow-sheet: 0 -1px 3px rgba(23, 20, 31, 0.04),
+                  0 -12px 40px -8px rgba(23, 20, 31, 0.18);
+  --shadow-brand: 0 1px 2px rgba(91, 75, 214, 0.20),
+                  0 6px 16px -4px rgba(91, 75, 214, 0.28);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* =============================================================================
+   BASE
+   ============================================================================= */
+
+html {
+  /* Stops the layout shifting sideways when a page grows past one screen. */
+  scrollbar-gutter: stable;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-canvas);
+  color: var(--color-ink-soft);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3 {
+  color: var(--color-ink);
+  letter-spacing: -0.018em;
+}
+
+/* Every figure in the app is tabular. A percentage that changes width as it
+   animates looks like a rendering fault. */
+.tnum,
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Native pickers open light rather than inheriting the browser's dark chrome. */
+input, select, textarea, button {
+  color-scheme: light;
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--color-brand-soft);
+  color: var(--color-brand-ink);
+}
+
+
+/* =============================================================================
+   COMPONENT LAYER
+   Shared idioms, defined once. A card that looks slightly different on two
+   screens is the fastest way to make an app feel amateur.
+   ============================================================================= */
+
+@layer components {
+
+  /* -------------------------------------------------------------- surfaces */
+
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .card-interactive {
+    transition: border-color 160ms ease, box-shadow 160ms ease,
+                transform 160ms ease;
+  }
+  .card-interactive:hover {
+    border-color: var(--color-line-strong);
+    box-shadow: var(--shadow-lift);
+  }
+  .card-interactive:active {
+    transform: scale(0.995);
+  }
+
+  /* --------------------------------------------------------------- display */
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    line-height: 1.08;
+    color: var(--color-ink);
+  }
+
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+
+  /* --------------------------------------------------------------- buttons */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.875rem;
+    padding: 0 1.125rem;
+    border-radius: var(--radius-field);
+    font-size: 0.9375rem;
+    font-weight: 550;
+    transition: background-color 150ms ease, color 150ms ease,
+                border-color 150ms ease, box-shadow 150ms ease,
+                transform 120ms ease;
+  }
+  .btn:active { transform: scale(0.985); }
+  .btn:disabled {
+    opacity: 1;
+    cursor: not-allowed;
+    background: var(--color-surface-sunk);
+    color: var(--color-ink-faint);
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .btn-primary {
+    background: var(--color-brand);
+    color: #fff;
+    box-shadow: var(--shadow-brand);
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--color-brand-hover); }
+
+  .btn-ghost {
+    background: var(--color-surface);
+    color: var(--color-ink-soft);
+    border: 1px solid var(--color-line);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    border-color: var(--color-line-strong);
+    background: var(--color-surface-sunk);
+  }
+
+  .btn-quiet {
+    background: transparent;
+    color: var(--color-ink-muted);
+  }
+  .btn-quiet:hover:not(:disabled) {
+    background: var(--color-surface-sunk);
+    color: var(--color-ink);
+  }
+
+  .btn-danger {
+    background: var(--color-critical);
+    color: #fff;
+  }
+
+  /* ---------------------------------------------------------------- fields */
+
+  .field {
+    width: 100%;
+    min-height: 2.875rem;
+    padding: 0.75rem 0.9375rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-field);
+    color: var(--color-ink);
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .field:hover  { border-color: var(--color-line-strong); }
+  .field:focus  {
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px var(--color-brand-soft);
+  }
+
+  .field-select {
+    appearance: none;
+    padding-right: 2.5rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%237c7589' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+  }
+
+  /* ------------------------------------------------------- segmented toggle */
+
+  .seg {
+    flex: 1;
+    min-height: 2.75rem;
+    border-radius: var(--radius-field);
+    font-size: 0.875rem;
+    font-weight: 550;
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    color: var(--color-ink-muted);
+    transition: all 150ms ease;
+  }
+  .seg:hover { border-color: var(--color-line-strong); color: var(--color-ink); }
+
+  .seg-on {
+    background: var(--color-brand);
+    border-color: var(--color-brand);
+    color: #fff;
+    box-shadow: var(--shadow-brand);
+  }
+  .seg-on:hover { background: var(--color-brand-hover); color: #fff; }
+
+  /* ----------------------------------------------------------------- chips */
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.75rem;
+    font-weight: 550;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+
+  .chip-brand    { background: var(--color-brand-soft);    color: var(--color-brand-ink); border-color: var(--color-brand-line); }
+  .chip-safe     { background: var(--color-safe-soft);     color: var(--color-safe);      border-color: var(--color-safe-line); }
+  .chip-watch    { background: var(--color-watch-soft);    color: var(--color-watch);     border-color: var(--color-watch-line); }
+  .chip-risk     { background: var(--color-risk-soft);     color: var(--color-risk);      border-color: var(--color-risk-line); }
+  .chip-critical { background: var(--color-critical-soft); color: var(--color-critical);  border-color: var(--color-critical-line); }
+  .chip-neutral  { background: var(--color-surface-sunk);  color: var(--color-ink-muted); border-color: var(--color-line); }
+
+  /* ---------------------------------------------------------------- sheets */
+
+  .sheet-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(23, 20, 31, 0.28);
+    backdrop-filter: blur(3px);
+    animation: fade-in 180ms ease-out;
+  }
+
+  /*
+   * ⚠ THE LAYOUT THAT KEEPS SAVE BUTTONS REACHABLE.
+   *
+   * A flex COLUMN with three children: shrink-0 header, flex-1 scrolling body,
+   * shrink-0 footer. The footer is a SIBLING of the scroll area, never a
+   * sticky child of it — sticky positions against the scroll container, so a
+   * sticky footer scrolls away the moment content exceeds the container.
+   *
+   * min-height: 0 on the body is the part that gets forgotten. Without it a
+   * flex child refuses to shrink below its content size and the whole sheet
+   * overflows regardless.
+   */
+  .sheet {
+    display: flex;
+    flex-direction: column;
+    max-height: min(86vh, 46rem);
+    overflow: hidden;
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sheet);
+    box-shadow: var(--shadow-sheet);
+    animation: sheet-up 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .sheet-head { flex-shrink: 0; border-bottom: 1px solid var(--color-line); }
+  .sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .sheet-foot {
+    flex-shrink: 0;
+    border-top: 1px solid var(--color-line);
+    background: var(--color-surface-raised);
+  }
+
+  .sheet-grip {
+    width: 2.25rem;
+    height: 0.25rem;
+    border-radius: var(--radius-pill);
+    background: var(--color-line-strong);
+    margin: 0 auto;
+  }
+
+  /* -------------------------------------------------------- aurora backdrop */
+
+  /* A soft wash behind hero areas. Three low-opacity radial gradients — enough
+     to stop a white page feeling empty, faint enough never to fight the text. */
+  .aurora {
+    position: relative;
+    isolation: isolate;
+  }
+  .aurora::before {
+    content: "";
+    position: absolute;
+    inset: -20% -10% auto -10%;
+    height: 22rem;
+    z-index: -1;
+    background:
+      radial-gradient(42% 58% at 12% 18%, rgba(99, 102, 241, 0.13), transparent 70%),
+      radial-gradient(38% 52% at 78% 8%,  rgba(168, 85, 247, 0.11), transparent 70%),
+      radial-gradient(34% 46% at 52% 34%, rgba(20, 184, 166, 0.08), transparent 70%);
+    filter: blur(8px);
+    pointer-events: none;
+  }
+}
+
+
+/* =============================================================================
+   MOTION
+   Short, eased, and switched off entirely for anyone who asks.
+   ============================================================================= */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(14px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes rise {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+.animate-rise { animation: rise 320ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
