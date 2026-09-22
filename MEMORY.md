@@ -145,3 +145,13 @@ cd C:\Users\abhid\Desktop\medprep; git add -A; git commit -m "session: <what cha
 [2026-09-22] Deleted dead file app/attendance/page.old.tsx.bak.
 [2026-09-22] MEMORY.md created as single source of truth, overriding AI memory.
 [2026-09-22] NEXT: test whether attendance survives a refresh.
+[2026-09-22 SESSION 2] Doc consolidation audit complete. AGENTS.md and CLAUDE.md
+             already point to MEMORY.md (no drift risk). git ls-files: 4 .md files
+             (AGENTS.md, CLAUDE.md, MEMORY.md, README.md).
+[2026-09-22] F5 persistence test: /attendance redirects to /attendance/setup.
+             /attendance marking page missing (earlier agent misunderstood intent,
+             built only setup + redirect). User already has saved timetable.
+[2026-09-22] DECISION: Rebuild /attendance page from scratch when user returns.
+             Do not start rebuild until user confirms return.
+[2026-09-22] USER REQUEST: wants MEMORY.md as downloadable file for local update
+             before next session.
