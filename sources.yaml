@@ -1,0 +1,97 @@
+# MedPrep source registry
+# ------------------------------------------------------------------
+# status:
+#   active         -> will be crawled
+#   manual_review  -> skipped; requires --force-source and a human decision
+#   blocked        -> robots.txt or ToS disallows; documented, never crawled
+#   unverified     -> URL not yet confirmed to serve papers; verify by hand first
+#
+# adapter:
+#   link_harvest   -> crawl seed pages, follow index links to depth, collect PDFs
+#   folder_enum    -> enumerate a URL template over a parameter list
+#
+# Verify every seed URL in a browser before setting status: active.
+# Portals move. A 404 is a registry bug, not a crawler bug.
+
+defaults:
+  course: MBBS
+  delay_seconds: 3.0
+  file_pattern: '\.pdf($|\?)'
+  max_depth: 2
+
+sources:
+
+  - key: rguhs
+    name: Rajiv Gandhi University of Health Sciences
+    status: unverified
+    adapter: link_harvest
+    homepage: https://rguhs.karnataka.gov.in/
+    seeds:
+      - https://rguhs.karnataka.gov.in/stud_qp_dwnld/
+    notes: >
+      Official student question-paper download portal. Verify whether it is a
+      static link listing or a POST-driven form. If it is form-driven, the
+      link_harvest adapter will find nothing: switch to folder_enum with the
+      observed query parameters, or record it as manual-download.
+
+  - key: kuhs
+    name: Kerala University of Health Sciences
+    status: unverified
+    adapter: folder_enum
+    homepage: http://www2.kuhs.ac.in/
+    url_template: 'http://www2.kuhs.ac.in/kuhs_new/index.php?id=14&folder={folder}'
+    folders:
+      - MODERN%20MEDICINE/UG/MBBS
+    notes: >
+      Folder-parameterised listing pages. Confirm the exact folder string for
+      MBBS by navigating the site; the BAMS path uses AYURVEDA/UG/BAMS, so the
+      MBBS equivalent is likely but not confirmed to follow the same shape.
+
+  - key: muhs
+    name: Maharashtra University of Health Sciences
+    status: unverified
+    adapter: link_harvest
+    homepage: https://muhs.ac.in/
+    seeds: []
+    notes: Locate the official examination / question-paper section and add seeds.
+
+  - key: ntruhs
+    name: Dr. NTR University of Health Sciences
+    status: unverified
+    adapter: link_harvest
+    homepage: https://ntruhs.ap.nic.in/
+    seeds: []
+
+  - key: tnmgrmu
+    name: Tamil Nadu Dr. M.G.R. Medical University
+    status: unverified
+    adapter: link_harvest
+    homepage: https://www.tnmgrmu.ac.in/
+    seeds: []
+
+  - key: wbuhs
+    name: West Bengal University of Health Sciences
+    status: unverified
+    adapter: link_harvest
+    homepage: https://www.wbuhs.ac.in/
+    seeds: []
+
+  - key: knruhs
+    name: Kaloji Narayana Rao University of Health Sciences
+    status: unverified
+    adapter: link_harvest
+    homepage: https://knruhs.telangana.gov.in/
+    seeds: []
+
+  # ---- Aggregators: deliberate human decision required -------------------
+  - key: firstranker
+    name: FirstRanker (third-party aggregator)
+    status: manual_review
+    adapter: link_harvest
+    homepage: https://firstranker.com/
+    seeds: []
+    notes: >
+      Large curated cross-university collection. The collection itself is a
+      compilation with its own rights independent of the underlying papers.
+      Do not bulk-harvest. If a specific paper is unobtainable from its issuing
+      university, source it individually and record provenance accordingly.
