@@ -1,99 +1,92 @@
 'use client';
 
 // =============================================================================
-// app/attendance/page.tsx — TEMPORARY STOPGAP
+// app/attendance/page.tsx
 // -----------------------------------------------------------------------------
-// This is NOT the rebuilt page. It exists so the dev server compiles and so the
-// v4 logic layer can be smoke-tested while RingGrid is being written.
+// THE REAL PAGE. Replaces the temporary stopgap entirely.
 //
-// It uses only the v4 API, so if the numbers here look right, then types +
-// store + calculate + generate are wired correctly.
+// Three children, assembled in the order a student actually uses them:
 //
-// Styling is plain Tailwind ON PURPOSE. No design tokens are invented here —
-// the real page will use globals.css.
+//   1. WeekStrip  — "have I logged everything?"   read-only
+//   2. MarkList   — the ten-second daily habit    the only marking surface
+//   3. RingGrid   — "am I safe?"                  resting view, no numbers
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ WHY THE MOUNT GATE EXISTS — READ BEFORE REMOVING IT
-// ═════════════════════════════════════════════════════════════════════════════
-// Every read in this file — getSettings(), generateForDate(), getYearResult() —
-// ultimately touches localStorage. On the server localStorage does not exist,
-// so store.ts correctly hands back defaults: no timetable, no sessions, no
-// marks. The server therefore renders "No classes scheduled today."
-//
-// The client then hydrates, localStorage IS there, and React finds a <div> full
-// of class rows where the server left a <p>. That is the hydration mismatch.
-//
-// Nothing is wrong with the store. isBrowser() is doing precisely its job. The
-// rule is simply: a component whose output depends on browser-only state must
-// not attempt to render that output on the server.
-//
-// So the first client render deliberately matches the server EXACTLY — both
-// produce the skeleton below — and real data appears on the second pass, after
-// useEffect has run. One extra frame, zero mismatch.
-//
-// ★ THE SAME GATE IS REQUIRED FOR WeekStrip AND MarkList. Both read generated
-//   sessions during render. Gate them HERE, in the parent, rather than adding
-//   a mounted flag to each component — one place to get right, and the children
-//   stay dumb.
+// This file owns almost nothing itself. It holds ONE piece of state and wires
+// three components together. That is deliberate: every screen in this module
+// has exactly one place where a bug can live, and for the page it is
+// `selectedDate`.
 //
 // ═════════════════════════════════════════════════════════════════════════════
-//  ★ MIGRATIONS RUN HERE, AND ONLY HERE
+//  ⚠ WHY selectedDate LIVES HERE AND NOWHERE ELSE
 // ═════════════════════════════════════════════════════════════════════════════
-// runMigrations() converts v2 → v3 → v4 storage. Until this call existed it was
-// written, correct, and invoked by nothing — meaning any student upgrading from
-// an older build would silently land on defaults: 75% everywhere, extra classes
-// reverting to the old global policy, custom targets gone.
+// The week strip and the marking list must always agree on which day is in
+// focus. Tap Thursday in the strip, the list jumps to Thursday. Pick Thursday
+// from the list's dropdown, the strip highlights Thursday.
 //
-// THREE RULES ABOUT THIS CALL:
+// If either component owned that state, the other would need to be told about
+// changes, and the two would drift the first time someone added a third entry
+// point (the calendar jump, which the list already has). One owner, two
+// consumers, no synchronisation code.
 //
-//   1. IT MUST RUN BEFORE THE FIRST STORE READ.
-//      That is why setMounted(true) comes AFTER it. Rendering content against
-//      pre-migration data would show a student the wrong figures for one frame,
-//      then correct them — which reads as a glitch and destroys confidence in
-//      every number on the screen.
+// The strip receives it as `anchorDate` (which week to show) AND as
+// `selectedDate` (which column to highlight) — same value, two jobs, because
+// selecting a day in another week should move the whole strip.
 //
-//   2. IT MUST RUN IN A TOP-LEVEL EFFECT, NOT A COMPONENT THAT REMOUNTS.
-//      Both migrations are flag-guarded and idempotent, so a second run is
-//      harmless — but a page that remounts on every navigation would re-read
-//      and re-write storage endlessly for no reason.
-//
-//   3. STRICTMODE FIRES EFFECTS TWICE IN DEV.
-//      The ref guard below makes that a no-op. The migration's own localStorage
-//      flags would catch it anyway; the ref just avoids the pointless second
-//      pass and keeps the report from flickering.
-//
-// When this page is replaced by the real one, THIS BLOCK MOVES WITH IT. Losing
-// it is invisible in testing — a fresh browser has nothing to migrate — and
-// catastrophic for the one group it matters to.
 // ═════════════════════════════════════════════════════════════════════════════
+//  ⚠ THE MOUNT GATE — READ BEFORE REMOVING IT
+// ═════════════════════════════════════════════════════════════════════════════
+// Every store read touches localStorage. On the server that does not exist, so
+// store.ts correctly returns defaults: no timetable, no sessions, no marks. The
+// server renders an empty state; the client hydrates with real data; React
+// finds a different tree and throws a hydration mismatch.
+//
+// Nothing is wrong with the store — isBrowser() is doing its job. The rule is:
+// a component whose output depends on browser-only state must not attempt to
+// render that output on the server.
+//
+// So the first client render matches the server EXACTLY (both produce the
+// skeleton), and real data appears on the second pass. One extra frame, zero
+// mismatch.
+//
+// ★ THE GATE LIVES HERE, IN THE PARENT. WeekStrip, MarkList and RingGrid all
+//   read the store during render and all three would need their own flag
+//   otherwise. Gating once keeps them dumb.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  ★ MIGRATIONS RUN HERE, BEFORE THE FIRST STORE READ
+// ═════════════════════════════════════════════════════════════════════════════
+// runMigrations() converts v2 → v3 → v4 storage. It was written, correct, and
+// called by nothing for several build steps — meaning any student upgrading
+// from an older build would silently land on defaults: 75% everywhere, extra
+// classes reverting to the old global policy, custom targets gone.
+//
+// THREE RULES:
+//   1. IT RUNS BEFORE setMounted(true). Rendering against pre-migration data
+//      would show wrong figures for one frame, then correct them — which reads
+//      as a glitch and undermines every number on the screen.
+//   2. IT RUNS IN A TOP-LEVEL EFFECT. Both migrations are flag-guarded and
+//      idempotent, so a repeat is harmless, but a component that remounts on
+//      every navigation would pointlessly re-read storage forever.
+//   3. STRICTMODE FIRES EFFECTS TWICE IN DEV. The ref guard makes that a no-op
+//      and stops the notes banner flickering.
+//
+// ⚠ STILL OUTSTANDING: a student whose first stop is /settings or /attendance/
+//   setup reads pre-migration data there. The proper home is a client effect in
+//   the root layout. Logged in MEMORY.md; not fixed here because layout.tsx has
+//   its own unrelated font issue and deserves one deliberate pass.
+// =============================================================================
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 
-import { getSettings, runMigrations, setMark, subscribe } from './store';
-import { generateForDate } from './generate';
-import { getYearResult, statusLine } from './calculate';
+import WeekStrip from './components/WeekStrip';
+import MarkList from './components/MarkList';
+import RingGrid from './components/RingGrid';
+
+import { getSettings, runMigrations, subscribe } from './store';
+import { getYearResult, getUnmarkedCount } from './calculate';
 import { todayISO } from '@/lib/attendance/datetime';
-import type { SafetyBand, Session, SessionStatus } from './types';
-
-
-/**
- * ⚠ BAND NAME MAPPING.
- *
- * types.ts uses:    safe | warning | danger | critical
- * globals.css uses: safe | watch   | risk   | critical
- *
- * Both vocabularies are reasonable, and renaming either would churn every
- * file, so the translation lives in ONE place — here.
- *
- * Never write `chip-${band}` directly. It silently produces `chip-warning`,
- * which does not exist, and the element renders unstyled with no error.
- */
-const BAND_TEXT: Record<SafetyBand, string> = {
-  safe: 'text-emerald-600',
-  warning: 'text-amber-600',
-  danger: 'text-orange-600',
-  critical: 'text-red-600',
-};
+import type { ISODate } from './types';
 
 
 export default function AttendancePage() {
@@ -101,20 +94,18 @@ export default function AttendancePage() {
   // entire hydration fix.
   const [mounted, setMounted] = useState(false);
 
-  // Anything the migration wants the student to know. Empty in the overwhelming
-  // majority of cases — a fresh install has nothing to convert.
+  // Anything the migration wants the student to know. Empty for the
+  // overwhelming majority — a fresh install has nothing to convert.
   const [migrationNotes, setMigrationNotes] = useState<string[]>([]);
 
-  // Re-render on any store write.
-  const [, force] = useState(0);
+  // Bumped on every store write. Passed down so children recompute; they are
+  // otherwise pure functions of (date, store), which React cannot see.
+  const [revision, setRevision] = useState(0);
 
-  // StrictMode double-invokes effects in development. Migrations are
-  // idempotent and flag-guarded, so this is belt-and-braces rather than
-  // load-bearing — but it stops the notes banner appearing twice.
   const migrationsRun = useRef(false);
 
   useEffect(() => {
-    // ---- 1. MIGRATE FIRST. Nothing may read the store before this returns. --
+    // ---- 1. MIGRATE. Nothing may read the store before this returns. -------
     if (!migrationsRun.current) {
       migrationsRun.current = true;
 
@@ -123,24 +114,24 @@ export default function AttendancePage() {
         const notes = [...v3.notes, ...v4.notes];
         if (notes.length > 0) setMigrationNotes(notes);
       } catch {
-        // A failed migration must never white-screen the app. The student's
-        // v2/v3 data is READ, never deleted, so a failure here leaves them on
-        // defaults with their old data still recoverable — bad, but survivable.
-        // Every other path in store.ts already returns a valid default.
+        // A failed migration must never white-screen the app. v2/v3 data is
+        // READ, never deleted, so a failure leaves the student on defaults with
+        // their old data still recoverable — bad, but survivable.
       }
     }
 
     // ---- 2. Only now is it safe to render real data. -----------------------
     setMounted(true);
 
-    // ---- 3. Subscribe to store changes. ------------------------------------
-    return subscribe(() => force((n) => n + 1));
+    // ---- 3. Repaint on any store change. -----------------------------------
+    return subscribe(() => setRevision((n) => n + 1));
   }, []);
 
   if (!mounted) return <Skeleton />;
 
   return (
     <AttendanceContent
+      revision={revision}
       migrationNotes={migrationNotes}
       onDismissNotes={() => setMigrationNotes([])}
     />
@@ -149,18 +140,21 @@ export default function AttendancePage() {
 
 
 /**
- * Rendered by the server and by the first client pass. Must contain NO store
- * reads whatsoever — if a single value here came from localStorage, the
- * mismatch would simply move rather than disappear.
+ * Rendered by the server and by the first client pass.
+ *
+ * ⚠ MUST CONTAIN NO STORE READS. If one value here came from localStorage the
+ *   mismatch would simply move rather than disappear. The shapes roughly match
+ *   the real layout so the transition does not jump.
  */
 function Skeleton() {
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
-      <div className="h-5 w-32 animate-pulse rounded bg-slate-200" />
-      <div className="mt-6 space-y-2">
-        <div className="h-16 animate-pulse rounded-xl bg-slate-100" />
-        <div className="h-16 animate-pulse rounded-xl bg-slate-100" />
-        <div className="h-16 animate-pulse rounded-xl bg-slate-100" />
+    <main className="mx-auto max-w-3xl px-4 pb-28 pt-4">
+      <div className="h-6 w-40 animate-pulse rounded bg-[--color-surface-sunk]" />
+      <div className="mt-4 h-44 animate-pulse rounded-[--radius-card] bg-[--color-surface-sunk]" />
+      <div className="mt-5 h-7 w-56 animate-pulse rounded bg-[--color-surface-sunk]" />
+      <div className="mt-3 space-y-2">
+        <div className="h-24 animate-pulse rounded-[--radius-card] bg-[--color-surface-sunk]" />
+        <div className="h-24 animate-pulse rounded-[--radius-card] bg-[--color-surface-sunk]" />
       </div>
     </main>
   );
@@ -168,41 +162,63 @@ function Skeleton() {
 
 
 /**
- * Client-only. Everything below this point may read the store freely, because
- * it never renders on the server and never runs before migration.
+ * Client-only. Everything below may read the store freely: it never renders on
+ * the server, and never runs before migration.
  */
 function AttendanceContent(props: {
+  revision: number;
   migrationNotes: string[];
   onDismissNotes: () => void;
 }) {
-  const { migrationNotes, onDismissNotes } = props;
+  const { revision, migrationNotes, onDismissNotes } = props;
 
+  const today = todayISO();
   const settings = getSettings();
   const year = settings.currentYear;
-  const today = todayISO();
 
-  const result = getYearResult(year);
-  const todaysClasses = generateForDate(year, today);
+  // ★ THE ONE PIECE OF STATE THIS PAGE OWNS. See the header.
+  const [selectedDate, setSelectedDate] = useState<ISODate>(today);
+
+  // Non-exam subjects are tracked silently and shown on request. A first-year
+  // does not need Community Medicine in their face when Anatomy is the one
+  // that can debar them.
+  const [showOthers, setShowOthers] = useState(false);
+
+  /**
+   * ONE call. getYearResult is memoised on DataVersion, so this costs a map
+   * lookup on every render after the first — and splitting exam from non-exam
+   * is a filter over the result, never a second computation.
+   */
+  const { examSubjects, otherSubjects, unmarked } = useMemo(() => {
+    void revision; // recompute when the store changes
+
+    const result = getYearResult(year);
+
+    return {
+      examSubjects: result.subjects.filter((s) => s.isExamSubject && !s.isExcluded),
+      otherSubjects: result.subjects.filter((s) => !s.isExamSubject || s.isExcluded),
+      unmarked: getUnmarkedCount(year),
+    };
+  }, [year, revision]);
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
+    <main className="mx-auto max-w-3xl px-4 pb-28 pt-4">
       {/* ------------------------------------------- migration report ------
-          Shown ONCE, when there is something to report.
+          Shown once, only when there is something to report.
 
-          A silent conversion is how you lose someone's trust: a student who
-          set 80% and finds 75% next week will not conclude "the app migrated
-          my data imperfectly" — they will conclude the app is unreliable and
-          go back to counting on paper. */}
+          A silent conversion is how trust is lost: a student who set 80% and
+          finds 75% next week will not conclude "the migration was imperfect" —
+          they will conclude the app is unreliable and go back to paper. */}
       {migrationNotes.length > 0 && (
-        <div className="mb-4 rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-3">
+        <div className="mb-4 rounded-[--radius-field] border border-[--color-brand-line] bg-[--color-brand-soft] px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-indigo-900">
+              <p className="text-sm font-semibold text-[--color-brand-ink]">
                 Your attendance data was updated
               </p>
               <ul className="mt-1.5 space-y-1">
                 {migrationNotes.map((note, i) => (
-                  <li key={i} className="text-sm text-indigo-800">
+                  <li key={i} className="text-sm text-[--color-brand-ink]">
                     - {note}
                   </li>
                 ))}
@@ -211,7 +227,7 @@ function AttendanceContent(props: {
             <button
               onClick={onDismissNotes}
               aria-label="Dismiss"
-              className="shrink-0 rounded px-2 py-1 text-sm text-indigo-700 hover:bg-indigo-100"
+              className="btn btn-quiet min-h-8 shrink-0 px-2 text-sm"
             >
               ✕
             </button>
@@ -219,132 +235,112 @@ function AttendanceContent(props: {
         </div>
       )}
 
-      <p className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Temporary page. The week strip, marking list and ring grid are not wired
-        in yet — this exists to verify the new calculator.
-      </p>
-
-      <h1 className="text-xl font-semibold">{year}</h1>
-
-      {/* ---------------------------------------------- today's classes ---- */}
-      <h2 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Today · {today}
-      </h2>
-
-      {todaysClasses.length === 0 ? (
-        <p className="text-sm text-slate-500">No classes scheduled today.</p>
-      ) : (
-        <div className="space-y-2">
-          {todaysClasses.map((s) => (
-            <MarkRow key={s.id} session={s} />
-          ))}
+      {/* ---------------------------------------------------- header ------- */}
+      <header className="mb-3 flex items-baseline justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="display truncate text-2xl">Attendance</h1>
+          <span className="text-xs text-[--color-ink-faint]">{year}</span>
         </div>
+
+        <Link href="/attendance/setup" className="btn btn-ghost min-h-9 text-sm">
+          Setup
+        </Link>
+      </header>
+
+      {/* ------------------------------------------------- week strip ------
+          Read-only. Tapping a day header moves the marking list below.
+          It is deliberately ABOVE the list: the first question on opening the
+          app is "what have I missed?", not "what am I marking?". */}
+      <WeekStrip
+        anchorDate={selectedDate}
+        selectedDate={selectedDate}
+        onSelectDay={setSelectedDate}
+        revision={revision}
+      />
+
+      {/* -------------------------------------------------- mark list ------
+          The only marking surface in the module. */}
+      <MarkList
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+        revision={revision}
+      />
+
+      {/* ------------------------------------------------------ rings ------ */}
+      <section className="mt-8">
+        <div className="mb-1 flex items-baseline justify-between gap-2">
+          <h2 className="eyebrow">Where you stand</h2>
+
+          {/* A count of OUTSTANDING ACTIONS, never a score. The distinction
+              matters: this number can be driven to zero by doing something,
+              which is the only kind of number worth putting in a header. */}
+          {unmarked > 0 && (
+            <button
+              onClick={() => setSelectedDate(today)}
+              className="chip chip-watch"
+            >
+              {unmarked} unmarked
+            </button>
+          )}
+        </div>
+
+        <p className="mb-3 text-xs text-[--color-ink-faint]">
+          Outer ring is theory, inner is practical or clinical. The notch on
+          each ring is the mark you need. Tap a subject for the numbers.
+        </p>
+
+        <RingGrid subjects={examSubjects} revision={revision} />
+      </section>
+
+      {/* ---------------------------------------------- other subjects -----
+          ⚠ TRAP 9 in practice. These are tracked, never discarded — but they
+          are not what the student is examined on this year, so they do not get
+          equal billing. Collapsed by default, one tap away, honest about the
+          count. */}
+      {otherSubjects.length > 0 && (
+        <section className="mt-8">
+          <button
+            onClick={() => setShowOthers((v) => !v)}
+            aria-expanded={showOthers}
+            className="btn btn-ghost w-full justify-between text-sm"
+          >
+            <span>
+              Other subjects{' '}
+              <span className="text-[--color-ink-faint]">
+                ({otherSubjects.length})
+              </span>
+            </span>
+            <span aria-hidden>{showOthers ? '▲' : '▼'}</span>
+          </button>
+
+          {showOthers && (
+            <div className="animate-rise mt-3">
+              <p className="mb-3 text-xs text-[--color-ink-faint]">
+                Still tracked, just not part of this year&apos;s exams.
+              </p>
+              <RingGrid subjects={otherSubjects} revision={revision} />
+            </div>
+          )}
+        </section>
       )}
 
-      {/* ---- per subject, per type. No pooled numbers anywhere. ---- */}
-      <h2 className="mt-8 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Subjects
-      </h2>
-
-      {result.subjects.length === 0 ? (
-        <p className="text-sm text-slate-500">
-          Nothing tracked yet. Add classes in setup.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {result.subjects.map((subject) => (
-            <div
-              key={subject.subjectId}
-              className="rounded-xl border border-slate-200 p-4"
-            >
-              <div className="flex items-baseline justify-between">
-                {/* Ring colour is identity; the LABEL carries safety. */}
-                <span className={`font-semibold ${BAND_TEXT[subject.worstBand]}`}>
-                  {subject.subjectName}
-                </span>
-                {subject.isExamSubject && (
-                  <span className="text-xs text-slate-400">exam subject</span>
-                )}
-              </div>
-
-              {subject.categories.map((c) => (
-                <div
-                  key={c.category}
-                  className="mt-3 border-t border-slate-100 pt-3"
-                >
-                  <div className="flex items-baseline justify-between text-sm">
-                    <span className="capitalize text-slate-600">{c.category}</span>
-                    <span className="tabular-nums">
-                      {c.isEmpty ? '—' : `${c.attended}/${c.conducted}`}
-                      {!c.isEmpty && (
-                        <span className={`ml-2 font-semibold ${BAND_TEXT[c.band]}`}>
-                          {c.percentDisplay}%
-                        </span>
-                      )}
-                      <span className="ml-2 text-xs text-slate-400">
-                        needs {c.threshold}%
-                        {c.isCustomThreshold ? ' (yours)' : ''}
-                      </span>
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">{statusLine(c)}</p>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
+      {/* ----------------------------------------------- first-run state ---
+          Not an error, and not an empty box. A student who has just installed
+          the app needs a door, not a dash. */}
+      {examSubjects.length === 0 && otherSubjects.length === 0 && (
+        <section className="card mt-4 p-6 text-center">
+          <p className="display text-lg">Nothing tracked yet</p>
+          <p className="mt-1.5 text-sm text-[--color-ink-muted]">
+            Add your timetable and we&apos;ll work out where you stand.
+          </p>
+          <Link
+            href="/attendance/setup"
+            className="btn btn-primary mt-4 inline-flex"
+          >
+            Set up my timetable
+          </Link>
+        </section>
       )}
     </main>
-  );
-}
-
-
-function MarkRow({ session }: { session: Session }) {
-  // Tapping the same button again unmarks. No separate clear control — mis-taps
-  // are frequent, so undo must be the most obvious gesture available.
-  const mark = (status: SessionStatus) =>
-    setMark(session.id, session.status === status ? 'unmarked' : status);
-
-  const btn = (status: SessionStatus, on: string) =>
-    `rounded-md border px-3 py-1.5 text-sm font-medium ${
-      session.status === status ? on : 'border-slate-200 text-slate-500'
-    }`;
-
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-slate-200 p-3">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{session.subjectName}</p>
-        <p className="text-xs text-slate-500">
-          {session.category} · {session.start}–{session.end}
-          {session.weight > 1 && ` · counts as ${session.weight}`}
-        </p>
-      </div>
-
-      <div className="flex shrink-0 gap-1.5">
-        <button
-          onClick={() => mark('present')}
-          className={btn('present', 'border-emerald-500 bg-emerald-500 text-white')}
-        >
-          P
-        </button>
-        <button
-          onClick={() => mark('absent')}
-          className={btn('absent', 'border-red-500 bg-red-500 text-white')}
-        >
-          A
-        </button>
-        <button
-          onClick={() => mark('not-conducted')}
-          className={`rounded-md border px-2 py-1 text-xs font-medium ${
-            session.status === 'not-conducted'
-              ? 'border-slate-400 bg-slate-400 text-white'
-              : 'border-slate-200 text-slate-400'
-          }`}
-          title="Cancelled — counts as 0 of 0"
-        >
-          C
-        </button>
-      </div>
-    </div>
   );
 }
