@@ -51,6 +51,18 @@
   --color-aurora-4:      #14b8a6;   /* teal    */
 
   /* ------------------------------------------------- attendance safety bands */
+  /*
+   * ⚠ NAME MAPPING — the code and the CSS use different words for the middle
+   *   two bands, deliberately, because both vocabularies are reasonable and
+   *   renaming either would churn every file:
+   *
+   *     types.ts SafetyBand : safe | warning | danger | critical
+   *     CSS tokens          : safe | watch   | risk   | critical
+   *
+   *   The translation lives in ONE place — the BAND_TOKEN map in the UI layer.
+   *   Never write `chip-${band}` directly; it silently produces `chip-warning`,
+   *   which does not exist, and the chip renders unstyled.
+   */
   --color-safe:          #0f9b6c;
   --color-safe-soft:     #e6f7f0;
   --color-safe-line:     #bfe9d8;
@@ -68,9 +80,23 @@
   --color-critical-line: #f7ccd1;
 
   /* ------------------------------------------------- class category accents  */
+  /*
+   * ⚠ --color-practical IS THE SAME GREEN AS --color-safe.
+   *
+   *   That is fine on the ring grid, where colour means CATEGORY. It is not
+   *   fine on the week strip, where green means PRESENT — a practical tile
+   *   would read as "attended" purely by being a practical.
+   *
+   *   Rule: the week strip uses STATUS colour only. Category is carried by the
+   *   subject short code, never by hue.
+   */
   --color-theory:        #4f6ef7;
   --color-practical:     #0f9b6c;
   --color-clinical:      #9333ea;
+
+  /* Unfilled portion of a progress ring. Without a visible track a 5% ring
+     reads as a stray mark rather than a mostly-empty ring. */
+  --color-ring-track:    #e9e5de;
 
   /* ------------------------------------------------------------------ type   */
   --font-display: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
@@ -369,6 +395,152 @@ input, select, textarea, button {
     background: var(--color-line-strong);
     margin: 0 auto;
   }
+
+  /* ====================================================== WEEK STRIP TILES ==
+
+     The top-of-screen weekly preview. Its only job is "have I logged
+     everything?" — never "am I safe?". That second question belongs to the
+     rings, and keeping the two in separate objects is what stops this screen
+     turning into a wall of numbers.
+
+     FILL vs OUTLINE CARRIES THE MEANING, not hue alone. That survives red-green
+     colour blindness (~1 in 12 male students), bright sunlight, and a cheap
+     phone screen — all three of which a medical student will hit this week.
+
+     THE THREE GREYS ARE ORDERED BY HOW MUCH THEY WANT A TAP:
+
+       unmarked  → LIGHT, SOLID      the eye lands here first; needs action
+       future    → PALEST, DASHED    nothing owed yet
+       cancelled → DARK, struck      settled, closed, nothing to do
+
+     That ordering is counter-intuitive until you say it out loud: a cancelled
+     class is FINISHED, so heavy-and-struck reads as closed rather than as a
+     demand. An unmarked one is the live item, so it stays light and solid and
+     draws the eye without shouting.
+
+     ⚠ NO CATEGORY COLOUR IN THIS BLOCK. --color-practical is the same green as
+       --color-safe, so a practical tile would read as "present" just by
+       existing. Status is the only thing colour means here.                   */
+
+  .tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tile-present {
+    background: var(--color-safe);
+    color: #fff;
+  }
+
+  .tile-absent {
+    background: var(--color-critical);
+    color: #fff;
+  }
+
+  /* Light AND solid. Solid fill is what separates it from .tile-future at
+     thumbnail size, where two neighbouring greys would otherwise merge. */
+  .tile-unmarked {
+    background: #e4e0da;
+    color: var(--color-ink-soft);
+    border-color: var(--color-line-strong);
+  }
+
+  /* Palest, and hollow. Nothing has happened yet, so nothing is owed. */
+  .tile-future {
+    background: transparent;
+    color: var(--color-ink-faint);
+    border-color: var(--color-line);
+    border-style: dashed;
+  }
+
+  /* Dark and struck through. Closed, not pending. */
+  .tile-cancelled {
+    background: var(--color-ink-muted);
+    color: #fff;
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+    opacity: 0.75;
+  }
+
+  /* Extra and quick-added classes are not in the timetable, so they appear in
+     a day column from nowhere. Without a marker the student sees a class they
+     do not recognise and stops trusting the strip. */
+  .tile-offgrid {
+    outline: 1.5px dashed var(--color-brand);
+    outline-offset: -3px;
+  }
+
+  /* Today's column. A tinted spine rather than a fill, so the eye lands here
+     without the tiles inside becoming harder to read. */
+  .day-today {
+    background: var(--color-brand-soft);
+    border-radius: 0.5rem;
+  }
+
+  /* An INFERRED break: a time slot where no working day has a class. Collapsed
+     to a hairline so the day's shape stays honest without a 90-minute lunch
+     eating a third of the strip.
+
+     Consecutive breaks merge into one row — a sparse first-year timetable
+     would otherwise render more break rows than class rows. */
+  .break-row {
+    font-size: 0.5625rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+    border-top: 1px dashed var(--color-line);
+    border-bottom: 1px dashed var(--color-line);
+    background: var(--color-surface-sunk);
+  }
+
+  /* ========================================================== RING GRID ====
+
+     Two concentric rings per subject.
+       OUTER = theory                 --color-theory    #4f6ef7
+       INNER = practical / clinical   --color-practical / --color-clinical
+       TRACK = --color-ring-track, so a 5% ring still reads as a ring
+
+     RING COLOUR = IDENTITY, ALWAYS. Safety lives on the subject LABEL beneath,
+     plus a tick mark on each track at the threshold position. That gives three
+     readings from one object: which type, how full, and safe or not.
+
+     ⚠ The outer ring is physically longer, so 75% outside draws a visibly
+       longer arc than 75% inside and students misread the inner one as worse.
+       Mitigate in the component: keep the radii close, start both arcs at
+       12 o'clock, and let the tick marks carry the comparison.
+
+     ⚠ Never shrink rings to fit more subjects. Change the arrangement, or
+       scroll. Below the minimum diameter the two arcs stop being separable.  */
+
+  .ring-track { stroke: var(--color-ring-track); }
+  .ring-arc   { stroke-linecap: round; transition: stroke-dashoffset 420ms cubic-bezier(0.32, 0.72, 0, 1); }
+
+  .ring-theory    { stroke: var(--color-theory); }
+  .ring-practical { stroke: var(--color-practical); }
+  .ring-clinical  { stroke: var(--color-clinical); }
+
+  /* The threshold marker on the track. Short, dark, and deliberately not
+     coloured — it is a reference line, not another status. */
+  .ring-tick { stroke: var(--color-ink-faint); stroke-width: 2; }
+
+  /* Subject label under a ring pair. Carries SAFETY colour, since the rings
+     themselves are committed to identity. */
+  .ring-label-safe     { color: var(--color-safe); }
+  .ring-label-watch    { color: var(--color-watch); }
+  .ring-label-risk     { color: var(--color-risk); }
+  .ring-label-critical { color: var(--color-critical); }
+  .ring-label-muted    { color: var(--color-ink-faint); }
 
   /* -------------------------------------------------------- aurora backdrop */
 
