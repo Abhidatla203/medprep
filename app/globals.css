@@ -3,65 +3,54 @@
 /* =============================================================================
    medprep — "Ink & Aurora"
    -----------------------------------------------------------------------------
-   A design system, not a colour swap.
-
    PRINCIPLES
-     1. Warm paper, not clinical grey. #FBFAF7 reads as considered; #F8FAFC
-        reads as a default.
-     2. Colour is SIGNAL. Indigo means "act on this." Emerald means "you're
-        fine." Nothing is coloured to be pretty.
-     3. Hairlines over shadows. A 1px border at low opacity separates surfaces
-        more cleanly than a blur, and stays crisp at any zoom.
-     4. Numbers are tabular everywhere. A percentage that shifts width as it
-        counts up looks broken.
+     1. Warm paper, not clinical grey.
+     2. Colour is SIGNAL, never decoration.
+     3. Hairlines over shadows — crisp at any zoom.
+     4. Tabular numbers everywhere.
 
-   NO AUTOMATIC DARK MODE. The prefers-color-scheme block is gone deliberately:
-   it made the app look different on two machines running identical code. If
-   dark mode returns it will be an explicit toggle with a full second palette.
+   NO AUTOMATIC DARK MODE. Removed deliberately: it made the app look different
+   on two machines running identical code.
    ============================================================================= */
 
 @theme {
   /* ---------------------------------------------------------------- surfaces */
-  --color-canvas:        #fbfaf7;   /* page — warm paper                       */
-  --color-surface:       #ffffff;   /* cards                                   */
-  --color-surface-sunk:  #f6f4f0;   /* inset fields, wells                     */
-  --color-surface-raised:#ffffff;   /* sheets, popovers                        */
+  --color-canvas:        #fbfaf7;
+  --color-surface:       #ffffff;
+  --color-surface-sunk:  #f6f4f0;
+  --color-surface-raised:#ffffff;
 
   /* ------------------------------------------------------------------- ink   */
-  --color-ink:           #17141f;   /* headings — near-black, violet cast      */
-  --color-ink-soft:      #4a4458;   /* body copy                               */
-  --color-ink-muted:     #7c7589;   /* secondary lines                         */
-  --color-ink-faint:     #a8a2b3;   /* labels, timestamps                      */
+  --color-ink:           #17141f;
+  --color-ink-soft:      #4a4458;
+  --color-ink-muted:     #7c7589;
+  --color-ink-faint:     #a8a2b3;
 
   /* ----------------------------------------------------------------- lines   */
-  --color-line:          #ebe7e0;   /* default hairline                        */
-  --color-line-strong:   #ddd8cf;   /* hover, emphasis                         */
+  --color-line:          #ebe7e0;
+  --color-line-strong:   #ddd8cf;
 
   /* --------------------------------------------------------------- primary   */
-  --color-brand:         #5b4bd6;   /* indigo-violet — the one strong accent   */
+  --color-brand:         #5b4bd6;
   --color-brand-hover:   #4c3dc4;
-  --color-brand-soft:    #efedfd;   /* tinted fill for chips and active states */
+  --color-brand-soft:    #efedfd;
   --color-brand-line:    #d9d4fa;
-  --color-brand-ink:     #3d2fa8;   /* readable brand text on soft fill        */
+  --color-brand-ink:     #3d2fa8;
 
   /* ---------------------------------------------------------------- accents  */
-  --color-aurora-1:      #6366f1;   /* indigo  */
-  --color-aurora-2:      #a855f7;   /* violet  */
-  --color-aurora-3:      #ec4899;   /* pink    */
-  --color-aurora-4:      #14b8a6;   /* teal    */
+  --color-aurora-1:      #6366f1;
+  --color-aurora-2:      #a855f7;
+  --color-aurora-3:      #ec4899;
+  --color-aurora-4:      #14b8a6;
 
   /* ------------------------------------------------- attendance safety bands */
   /*
-   * ⚠ NAME MAPPING — the code and the CSS use different words for the middle
-   *   two bands, deliberately, because both vocabularies are reasonable and
-   *   renaming either would churn every file:
-   *
-   *     types.ts SafetyBand : safe | warning | danger | critical
-   *     CSS tokens          : safe | watch   | risk   | critical
-   *
-   *   The translation lives in ONE place — the BAND_TOKEN map in the UI layer.
-   *   Never write `chip-${band}` directly; it silently produces `chip-warning`,
-   *   which does not exist, and the chip renders unstyled.
+   * ⚠ NAME MAPPING — code and CSS use different words for the middle two:
+   *     types.ts : safe | warning | danger | critical
+   *     CSS      : safe | watch   | risk   | critical
+   *   Translation lives in ONE place per component (BAND_CLASS / BAND_TEXT).
+   *   Never write `chip-${band}` inline — `chip-warning` does not exist and
+   *   renders unstyled with no error.
    */
   --color-safe:          #0f9b6c;
   --color-safe-soft:     #e6f7f0;
@@ -82,21 +71,28 @@
   /* ------------------------------------------------- class category accents  */
   /*
    * ⚠ --color-practical IS THE SAME GREEN AS --color-safe.
-   *
-   *   That is fine on the ring grid, where colour means CATEGORY. It is not
-   *   fine on the week strip, where green means PRESENT — a practical tile
-   *   would read as "attended" purely by being a practical.
-   *
-   *   Rule: the week strip uses STATUS colour only. Category is carried by the
-   *   subject short code, never by hue.
+   *   Fine on the ring grid, where colour means CATEGORY. NOT fine on the week
+   *   strip, where green means PRESENT. The strip uses status colour only.
    */
   --color-theory:        #4f6ef7;
   --color-practical:     #0f9b6c;
   --color-clinical:      #9333ea;
 
-  /* Unfilled portion of a progress ring. Without a visible track a 5% ring
-     reads as a stray mark rather than a mostly-empty ring. */
-  --color-ring-track:    #e9e5de;
+  /*
+   * ★ RING TRACK — DARKENED, DELIBERATELY.
+   *
+   * This was #e9e5de on a #fbfaf7 canvas: a 4% luminance difference, which is
+   * invisible on a phone in daylight. The unfilled part of the ring simply
+   * vanished, so a subject at 20% looked identical to a broken component.
+   *
+   * The track is not decoration — it is the DENOMINATOR made visible. Without
+   * it there is no "out of what", and the arc means nothing.
+   *
+   * #dcd6cc is a clear warm grey: obviously present, still quieter than every
+   * category colour, so it never competes with the filled arc.
+   */
+  --color-ring-track:    #dcd6cc;
+  --color-ring-empty:    #c9c2b6;   /* dashed ring for "no classes yet"        */
 
   /* ------------------------------------------------------------------ type   */
   --font-display: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
@@ -107,6 +103,7 @@
   --radius-card:  1.25rem;
   --radius-field: 0.875rem;
   --radius-sheet: 1.75rem;
+  --radius-modal: 1.5rem;
   --radius-pill:  9999px;
 
   /* ---------------------------------------------------------------- shadows  */
@@ -116,6 +113,8 @@
                   0 8px 20px -6px rgba(23, 20, 31, 0.10);
   --shadow-sheet: 0 -1px 3px rgba(23, 20, 31, 0.04),
                   0 -12px 40px -8px rgba(23, 20, 31, 0.18);
+  --shadow-modal: 0 2px 8px rgba(23, 20, 31, 0.08),
+                  0 24px 64px -12px rgba(23, 20, 31, 0.28);
   --shadow-brand: 0 1px 2px rgba(91, 75, 214, 0.20),
                   0 6px 16px -4px rgba(91, 75, 214, 0.28);
 }
@@ -126,7 +125,6 @@
    ============================================================================= */
 
 html {
-  /* Stops the layout shifting sideways when a page grows past one screen. */
   scrollbar-gutter: stable;
   -webkit-text-size-adjust: 100%;
 }
@@ -140,20 +138,24 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Set by the modal while it is open. Without this the page behind scrolls
+   under the scrim on iOS, which instantly breaks the illusion of a layer. */
+body[data-modal-open="true"] {
+  overflow: hidden;
+  touch-action: none;
+}
+
 h1, h2, h3 {
   color: var(--color-ink);
   letter-spacing: -0.018em;
 }
 
-/* Every figure in the app is tabular. A percentage that changes width as it
-   animates looks like a rendering fault. */
 .tnum,
 input[type="number"] {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
 
-/* Native pickers open light rather than inheriting the browser's dark chrome. */
 input, select, textarea, button {
   color-scheme: light;
   font-family: inherit;
@@ -173,8 +175,6 @@ input, select, textarea, button {
 
 /* =============================================================================
    COMPONENT LAYER
-   Shared idioms, defined once. A card that looks slightly different on two
-   screens is the fastest way to make an app feel amateur.
    ============================================================================= */
 
 @layer components {
@@ -196,9 +196,7 @@ input, select, textarea, button {
     border-color: var(--color-line-strong);
     box-shadow: var(--shadow-lift);
   }
-  .card-interactive:active {
-    transform: scale(0.995);
-  }
+  .card-interactive:active { transform: scale(0.995); }
 
   /* --------------------------------------------------------------- display */
 
@@ -270,10 +268,7 @@ input, select, textarea, button {
     color: var(--color-ink);
   }
 
-  .btn-danger {
-    background: var(--color-critical);
-    color: #fff;
-  }
+  .btn-danger { background: var(--color-critical); color: #fff; }
 
   /* ---------------------------------------------------------------- fields */
 
@@ -289,8 +284,8 @@ input, select, textarea, button {
     outline: none;
     transition: border-color 150ms ease, box-shadow 150ms ease;
   }
-  .field:hover  { border-color: var(--color-line-strong); }
-  .field:focus  {
+  .field:hover { border-color: var(--color-line-strong); }
+  .field:focus {
     border-color: var(--color-brand);
     box-shadow: 0 0 0 3px var(--color-brand-soft);
   }
@@ -359,15 +354,10 @@ input, select, textarea, button {
 
   /*
    * ⚠ THE LAYOUT THAT KEEPS SAVE BUTTONS REACHABLE.
-   *
-   * A flex COLUMN with three children: shrink-0 header, flex-1 scrolling body,
-   * shrink-0 footer. The footer is a SIBLING of the scroll area, never a
-   * sticky child of it — sticky positions against the scroll container, so a
-   * sticky footer scrolls away the moment content exceeds the container.
-   *
-   * min-height: 0 on the body is the part that gets forgotten. Without it a
-   * flex child refuses to shrink below its content size and the whole sheet
-   * overflows regardless.
+   * Flex column: shrink-0 head, flex-1 scrolling body, shrink-0 foot. The foot
+   * is a SIBLING of the scroll area, never a sticky child — sticky positions
+   * against the scroll container and scrolls away once content overflows.
+   * min-height: 0 on the body is the part everyone forgets.
    */
   .sheet {
     display: flex;
@@ -396,31 +386,98 @@ input, select, textarea, button {
     margin: 0 auto;
   }
 
+  /* ========================================================= MODAL LAYER ====
+
+     A CENTRED, FLOATING LAYER — not a card appended below the content.
+
+     The difference is not cosmetic. An inline card pushes the page around,
+     leaves the background fully legible and competing for attention, and gives
+     no signal that you are in a temporary state. A modal lifts one object above
+     a blurred, dimmed page: the background is visibly still there (so you never
+     feel lost) but unmistakably inactive.
+
+     THREE THINGS THAT MAKE IT FEEL NATIVE RATHER THAN WEB:
+       1. BLUR, not just dim. Blurring the backdrop is what iOS does and what
+          plain CSS overlays almost never do. It reads as depth.
+       2. SPRING SCALE. Entering at 0.94 and settling at 1.0 on a
+          cubic-bezier(0.32, 0.72, 0, 1) curve gives the slight overshoot-free
+          "settle" of a UIKit presentation. A linear fade reads as a webpage.
+       3. THE SCRIM FADES SEPARATELY, and slightly slower, so the card arrives
+          before the background finishes receding.                            */
+
+  .modal-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .modal-scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(23, 20, 31, 0.32);
+    /* -webkit- prefix matters: Safari on iOS is the primary target. */
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    backdrop-filter: blur(14px) saturate(120%);
+    animation: fade-in 220ms ease-out;
+  }
+
+  .modal-card {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 26rem;
+    max-height: min(82vh, 40rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-modal);
+    box-shadow: var(--shadow-modal);
+    animation: modal-in 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .modal-head { flex-shrink: 0; }
+  .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+  /* Round, quiet, and big enough to hit with a thumb. */
+  .modal-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.875rem;
+    height: 1.875rem;
+    flex-shrink: 0;
+    border-radius: var(--radius-pill);
+    background: var(--color-surface-sunk);
+    color: var(--color-ink-muted);
+    font-size: 0.875rem;
+    line-height: 1;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+  .modal-close:hover {
+    background: var(--color-line);
+    color: var(--color-ink);
+  }
+
   /* ====================================================== WEEK STRIP TILES ==
 
-     The top-of-screen weekly preview. Its only job is "have I logged
-     everything?" — never "am I safe?". That second question belongs to the
-     rings, and keeping the two in separate objects is what stops this screen
-     turning into a wall of numbers.
+     ROWS = days, COLUMNS = time. Matches the printed college timetable, and
+     sends overflow sideways instead of making the strip taller.
 
-     FILL vs OUTLINE CARRIES THE MEANING, not hue alone. That survives red-green
-     colour blindness (~1 in 12 male students), bright sunlight, and a cheap
-     phone screen — all three of which a medical student will hit this week.
+     FILL vs OUTLINE CARRIES THE MEANING, not hue alone — survives colour
+     blindness, sunlight, and a cheap screen.
 
-     THE THREE GREYS ARE ORDERED BY HOW MUCH THEY WANT A TAP:
-
-       unmarked  → LIGHT, SOLID      the eye lands here first; needs action
+     THE THREE GREYS, ORDERED BY HOW MUCH THEY WANT A TAP:
+       unmarked  → LIGHT, SOLID      the live item
        future    → PALEST, DASHED    nothing owed yet
-       cancelled → DARK, struck      settled, closed, nothing to do
+       cancelled → DARK, struck      closed, not pending
 
-     That ordering is counter-intuitive until you say it out loud: a cancelled
-     class is FINISHED, so heavy-and-struck reads as closed rather than as a
-     demand. An unmarked one is the live item, so it stays light and solid and
-     draws the eye without shouting.
-
-     ⚠ NO CATEGORY COLOUR IN THIS BLOCK. --color-practical is the same green as
-       --color-safe, so a practical tile would read as "present" just by
-       existing. Status is the only thing colour means here.                   */
+     ⚠ NO CATEGORY COLOUR HERE. Status only.                                  */
 
   .tile {
     display: flex;
@@ -438,33 +495,22 @@ input, select, textarea, button {
     white-space: nowrap;
   }
 
-  .tile-present {
-    background: var(--color-safe);
-    color: #fff;
-  }
+  .tile-present  { background: var(--color-safe);     color: #fff; }
+  .tile-absent   { background: var(--color-critical); color: #fff; }
 
-  .tile-absent {
-    background: var(--color-critical);
-    color: #fff;
-  }
-
-  /* Light AND solid. Solid fill is what separates it from .tile-future at
-     thumbnail size, where two neighbouring greys would otherwise merge. */
   .tile-unmarked {
     background: #e4e0da;
     color: var(--color-ink-soft);
     border-color: var(--color-line-strong);
   }
 
-  /* Palest, and hollow. Nothing has happened yet, so nothing is owed. */
   .tile-future {
     background: transparent;
     color: var(--color-ink-faint);
-    border-color: var(--color-line);
+    border-color: var(--color-line-strong);
     border-style: dashed;
   }
 
-  /* Dark and struck through. Closed, not pending. */
   .tile-cancelled {
     background: var(--color-ink-muted);
     color: #fff;
@@ -473,27 +519,10 @@ input, select, textarea, button {
     opacity: 0.75;
   }
 
-  /* Extra and quick-added classes are not in the timetable, so they appear in
-     a day column from nowhere. Without a marker the student sees a class they
-     do not recognise and stops trusting the strip. */
-  .tile-offgrid {
-    outline: 1.5px dashed var(--color-brand);
-    outline-offset: -3px;
-  }
+  .tile-offgrid { outline: 1.5px dashed var(--color-brand); outline-offset: -3px; }
 
-  /* Today's column. A tinted spine rather than a fill, so the eye lands here
-     without the tiles inside becoming harder to read. */
-  .day-today {
-    background: var(--color-brand-soft);
-    border-radius: 0.5rem;
-  }
+  .day-today { background: var(--color-brand-soft); border-radius: 0.5rem; }
 
-  /* An INFERRED break: a time slot where no working day has a class. Collapsed
-     to a hairline so the day's shape stays honest without a 90-minute lunch
-     eating a third of the strip.
-
-     Consecutive breaks merge into one row — a sparse first-year timetable
-     would otherwise render more break rows than class rows. */
   .break-row {
     font-size: 0.5625rem;
     letter-spacing: 0.08em;
@@ -506,36 +535,45 @@ input, select, textarea, button {
 
   /* ========================================================== RING GRID ====
 
-     Two concentric rings per subject.
-       OUTER = theory                 --color-theory    #4f6ef7
-       INNER = practical / clinical   --color-practical / --color-clinical
-       TRACK = --color-ring-track, so a 5% ring still reads as a ring
+     OUTER = theory                 --color-theory
+     INNER = practical / clinical   --color-practical / --color-clinical
+     TRACK = --color-ring-track     THE DENOMINATOR, MADE VISIBLE
 
-     RING COLOUR = IDENTITY, ALWAYS. Safety lives on the subject LABEL beneath,
-     plus a tick mark on each track at the threshold position. That gives three
-     readings from one object: which type, how full, and safe or not.
+     RING COLOUR = IDENTITY, ALWAYS. Safety lives on the label beneath plus the
+     threshold tick on the track. Three readings from one object: which type,
+     how full, safe or not.
 
-     ⚠ The outer ring is physically longer, so 75% outside draws a visibly
-       longer arc than 75% inside and students misread the inner one as worse.
-       Mitigate in the component: keep the radii close, start both arcs at
-       12 o'clock, and let the tick marks carry the comparison.
+     ⚠ The outer ring is physically longer, so 75% outside draws a longer arc
+       than 75% inside. Mitigated by keeping the radii close, starting both at
+       12 o'clock, and letting the ticks carry the comparison.
 
      ⚠ Never shrink rings to fit more subjects. Change the arrangement, or
-       scroll. Below the minimum diameter the two arcs stop being separable.  */
+       scroll. Below ~96px the two arcs stop being separable.                  */
 
   .ring-track { stroke: var(--color-ring-track); }
-  .ring-arc   { stroke-linecap: round; transition: stroke-dashoffset 420ms cubic-bezier(0.32, 0.72, 0, 1); }
+
+  /* No classes yet. A dashed ring says "nothing here yet" — a solid track with
+     no arc just looks like the component failed. */
+  .ring-empty {
+    stroke: var(--color-ring-empty);
+    stroke-dasharray: 3 6;
+    stroke-linecap: round;
+    opacity: 0.85;
+  }
+
+  .ring-arc {
+    stroke-linecap: round;
+    transition: stroke-dashoffset 480ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
 
   .ring-theory    { stroke: var(--color-theory); }
   .ring-practical { stroke: var(--color-practical); }
   .ring-clinical  { stroke: var(--color-clinical); }
 
-  /* The threshold marker on the track. Short, dark, and deliberately not
-     coloured — it is a reference line, not another status. */
-  .ring-tick { stroke: var(--color-ink-faint); stroke-width: 2; }
+  /* The threshold marker. Deliberately uncoloured — a reference line, not
+     another status. Darker than the track so it reads ON it. */
+  .ring-tick { stroke: var(--color-ink-muted); stroke-width: 2.5; }
 
-  /* Subject label under a ring pair. Carries SAFETY colour, since the rings
-     themselves are committed to identity. */
   .ring-label-safe     { color: var(--color-safe); }
   .ring-label-watch    { color: var(--color-watch); }
   .ring-label-risk     { color: var(--color-risk); }
@@ -544,12 +582,7 @@ input, select, textarea, button {
 
   /* -------------------------------------------------------- aurora backdrop */
 
-  /* A soft wash behind hero areas. Three low-opacity radial gradients — enough
-     to stop a white page feeling empty, faint enough never to fight the text. */
-  .aurora {
-    position: relative;
-    isolation: isolate;
-  }
+  .aurora { position: relative; isolation: isolate; }
   .aurora::before {
     content: "";
     position: absolute;
@@ -568,7 +601,6 @@ input, select, textarea, button {
 
 /* =============================================================================
    MOTION
-   Short, eased, and switched off entirely for anyone who asks.
    ============================================================================= */
 
 @keyframes fade-in {
@@ -579,6 +611,13 @@ input, select, textarea, button {
 @keyframes sheet-up {
   from { transform: translateY(14px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* Scale from 0.94 with a slight lift. The curve is the UIKit presentation
+   feel — fast out, long settle, no bounce. */
+@keyframes modal-in {
+  from { transform: scale(0.94) translateY(8px); opacity: 0; }
+  to   { transform: scale(1)    translateY(0);   opacity: 1; }
 }
 
 @keyframes rise {
