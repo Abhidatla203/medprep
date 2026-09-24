@@ -6,64 +6,28 @@
 //   ROWS    = days  (one per working day, fixed height)
 //   COLUMNS = time  (segments between boundaries, width ∝ duration)
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  WHY DAYS ARE ROWS AND TIME RUNS ACROSS
-// ═════════════════════════════════════════════════════════════════════════════
-//   1. IT MATCHES THE PRINTED TIMETABLE. Indian college timetables are almost
-//      universally days-down, periods-across. That is the model the student
-//      already holds for their own schedule — not the Google Calendar one.
-//   2. OVERFLOW GOES SIDEWAYS. The variable axis is TIME. With days as columns,
-//      extra slots made the strip TALLER, competing with the marking list for
-//      the most valuable space on screen. Now they scroll horizontally.
-//   3. HEIGHT IS FIXED. Six working days is six rows, every week.
-//   4. BREAKS COST ALMOST NOTHING — a narrow column instead of a full row.
+// WHY DAYS ARE ROWS: it matches the printed college timetable, it sends overflow
+// SIDEWAYS instead of making the strip taller (the variable axis is time), the
+// height stays fixed at six rows, and a break costs a narrow column instead of
+// a full row.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  ★ THE SEGMENT MODEL — THE FIX FOR "ALL CLASSES LOOK THE SAME WIDTH"
-// ═════════════════════════════════════════════════════════════════════════════
-// The previous version built one column per DISTINCT start/end pair, then
-// skipped any slot contained inside a longer one. A 10:30–13:00 posting
-// therefore swallowed the 11:00 and 12:00 columns, leaving nothing for it to
-// span — so it rendered exactly as wide as a one-hour lecture. Class length was
-// invisible, which defeats half the point of the strip.
-//
-// THE MODEL NOW:
-//   • collect EVERY boundary minute in the week (all starts, all ends)
-//   • a SEGMENT is the span between two consecutive boundaries
-//   • a segment is a CLASS segment if any session covers it, else a BREAK
-//   • each class segment's width is proportional to its duration in minutes
-//   • a session spans every segment it covers
-//
-// Consequences, all of them wanted:
-//   - a 150-minute posting is 150 units wide; a 60-minute lecture is 60
-//   - a class that straddles a break spans the break too, which is honest
-//   - college hours fall out for free: no segment exists before the first class
-//     or after the last, so nothing is padded
-//
-// ═════════════════════════════════════════════════════════════════════════════
-//  ★ BREAK INFERENCE (spec §7.2)
-// ═════════════════════════════════════════════════════════════════════════════
-// The student NEVER configures break times. A segment where NO working day has
-// a class is a break. Consecutive breaks merge. Gaps under 20 minutes are
-// changeover, not lunch — they stay as empty class segments so back-to-back
-// classes do not look separated.
-//
-// A break is now a VISIBLE column: dashed rule, its duration in the header, its
-// range in the tooltip. Previously it was 6px of nothing, which is the same as
-// not implementing it.
-//
-// ═════════════════════════════════════════════════════════════════════════════
-//  THREE HARD RULES
-//   1. READ-ONLY. Renders sessions, computes nothing. Marking is the list below.
+// THREE HARD RULES
+//   1. READ-ONLY. Marking happens in the list below. A preview you can edit is
+//      not a preview.
 //   2. NO PERCENTAGES. Ever. A figure here gets read as a standing.
-//   3. NO CATEGORY COLOUR. --color-practical is the same green as --color-safe,
-//      so a practical tile would read as "present" just by existing. Colour
-//      means STATUS here; category is carried by the subject code.
+//   3. STATUS OWNS THE FILL. Class type rides on a stripe and a letter — see
+//      Section 6 for why colouring tiles by category cannot work here.
 // =============================================================================
 
 import { useMemo } from 'react';
 
-import type { DayIndex, ISODate, Session, WeekTileStatus } from '../types';
+import type {
+  ClassCategory,
+  DayIndex,
+  ISODate,
+  Session,
+  WeekTileStatus,
+} from '../types';
 import { DAY_NAMES_SHORT } from '../types';
 import { generateForWeek } from '../generate';
 import { getSettings } from '../store';
@@ -72,10 +36,7 @@ import { subjectShort } from '@/lib/attendance/curriculum';
 
 
 // -----------------------------------------------------------------------------
-// SECTION 1 — Time helpers
-//
-// Local rather than imported: this is LAYOUT arithmetic, not domain logic, and
-// the strip should not gain a dependency on datetime.ts for minute maths.
+// SECTION 1 — Time helpers (layout arithmetic, not domain logic)
 // -----------------------------------------------------------------------------
 
 function toMinutes(hhmm: string): number {
@@ -84,14 +45,9 @@ function toMinutes(hhmm: string): number {
 }
 
 /**
- * ★ ALWAYS CARRIES am/pm.
- *
- * The previous version printed bare hours to save width — headers read
- * "9  10:30  2  3", and "2" is not a time anyone can read at a glance. A
- * student looking at this would have to decode it, which is exactly the work
- * the strip exists to remove. Meridiem costs four pixels and is non-negotiable.
- *
- *   540 → "9am"     810 → "1:30pm"     840 → "2pm"
+ * ★ ALWAYS CARRIES am/pm. An earlier version printed bare hours to save width —
+ * headers read "9  10:30  2  3", and "2" is not a time anyone can read at a
+ * glance. The meridiem costs four pixels and is non-negotiable.
  */
 function formatTime(mins: number): string {
   const h24 = Math.floor(mins / 60) % 24;
@@ -103,7 +59,6 @@ function formatTime(mins: number): string {
     : `${h12}:${String(m).padStart(2, '0')}${suffix}`;
 }
 
-/** "1h", "45m", "2h 30m" — for break headers and tooltips. */
 function formatDuration(mins: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
@@ -112,11 +67,9 @@ function formatDuration(mins: number): string {
 }
 
 /**
- * Local calendar date, never UTC.
- *
- * toISOString() converts to UTC first, so in IST any date computed after 18:30
- * shifts back a day — the "today" highlight would land on the wrong row every
- * evening. The kind of bug reported as "it's just broken sometimes".
+ * Local calendar date, never UTC. toISOString() converts to UTC first, so in IST
+ * any date computed after 18:30 shifts back a day — "today" would highlight the
+ * wrong row every evening.
  */
 function toISO(d: Date): ISODate {
   const y = d.getFullYear();
@@ -140,16 +93,29 @@ function weekStartFor(iso: ISODate): ISODate {
   return addDays(iso, -isoToDayIndex(iso));
 }
 
+/** "22–27 Sept". Shown only when viewing a week other than the current one. */
+function formatRange(start: ISODate, end: ISODate): string {
+  const s = new Date(`${start}T00:00:00`);
+  const e = new Date(`${end}T00:00:00`);
+  const startMonth = s.toLocaleDateString(undefined, { month: 'short' });
+  const endMonth = e.toLocaleDateString(undefined, { month: 'short' });
+
+  return s.getMonth() === e.getMonth()
+    ? `${s.getDate()}–${e.getDate()} ${endMonth}`
+    : `${s.getDate()} ${startMonth} – ${e.getDate()} ${endMonth}`;
+}
+
 
 // -----------------------------------------------------------------------------
-// SECTION 2 — Status mapping
-//
-// Session status is what was RECORDED. Tile status is what the student should
-// SEE — they differ in exactly one case: an unmarked class that has not
-// happened yet is "future", not an outstanding action. Getting that wrong is
-// what would have made the feature annoying: Thursday nagging on Monday.
+// SECTION 2 — Status and category maps
 // -----------------------------------------------------------------------------
 
+/**
+ * Session status is what was RECORDED. Tile status is what the student should
+ * SEE — they differ in exactly one case: an unmarked class that has not happened
+ * yet is "future", not an outstanding action. Getting that wrong is what would
+ * have made the whole feature annoying — Thursday nagging on Monday evening.
+ */
 function tileStatusFor(session: Session, today: ISODate): WeekTileStatus {
   switch (session.status) {
     case 'present':
@@ -165,7 +131,7 @@ function tileStatusFor(session: Session, today: ISODate): WeekTileStatus {
 
 /**
  * The three greys, ordered by how much each wants a tap:
- *   unmarked  → light, SOLID    the live item, eye lands here first
+ *   unmarked  → light, SOLID    the live item
  *   future    → palest, dashed  nothing owed yet
  *   cancelled → dark, struck    closed, not pending
  */
@@ -177,21 +143,59 @@ const TILE_CLASS: Record<WeekTileStatus, string> = {
   cancelled: 'tile-cancelled',
 };
 
-/** Overlay label colour, so a multi-segment tile stays readable. */
 const LABEL_CLASS: Record<WeekTileStatus, string> = {
   present: 'text-white',
   absent: 'text-white',
-  unmarked: 'text-[--color-ink-soft]',
-  future: 'text-[--color-ink-faint]',
+  unmarked: 'text-ink-soft',
+  future: 'text-ink-faint',
   cancelled: 'text-white line-through',
+};
+
+/**
+ * ★ SAME COLOURS AS THE RING GRID — purple theory, orange practical, cyan
+ *   clinical — so class type means one thing across the whole screen.
+ *   Hard-coded for the same reason as the rings: a CSS class that stops
+ *   resolving fails silently and would take the type indicator with it.
+ */
+const CATEGORY_STRIPE: Record<ClassCategory, string> = {
+  theory: '#7c3aed',
+  practical: '#ea580c',
+  clinical: '#0891b2',
+};
+
+const CATEGORY_LETTER: Record<ClassCategory, string> = {
+  theory: 'T',
+  practical: 'P',
+  clinical: 'C',
+};
+
+const CATEGORY_WORD: Record<ClassCategory, string> = {
+  theory: 'Theory',
+  practical: 'Practical',
+  clinical: 'Clinical',
 };
 
 
 // -----------------------------------------------------------------------------
 // SECTION 3 — Segments
+//
+// ★ WHY CLASS LENGTH IS NOW VISIBLE. An earlier version built one column per
+//   distinct start/end pair, then skipped any slot contained inside a longer
+//   one. A 10:30–13:00 posting swallowed the 11:00 and 12:00 columns, leaving
+//   nothing to span — so it rendered exactly as wide as a one-hour lecture.
+//
+//   NOW: collect EVERY boundary minute in the week; a SEGMENT is the span
+//   between two consecutive boundaries; width is proportional to duration; a
+//   session spans every segment it covers.
+//
+// BREAK INFERENCE (spec §7.2): the student NEVER configures break times. A
+// segment no working day covers is a break. Consecutive breaks merge. Gaps under
+// 20 minutes are changeover, not lunch.
+//
+// College hours fall out free: no segment exists before the first class or after
+// the last, so nothing is padded.
 // -----------------------------------------------------------------------------
 
-/** Under this, a gap is changeover between rooms, not a break. */
 const BREAK_THRESHOLD_MINUTES = 20;
 
 interface Segment {
@@ -224,13 +228,12 @@ function buildSegments(sessions: Session[]): Segment[] {
     const startMin = points[i];
     const endMin = points[i + 1];
 
-    // Covered if ANY session on ANY working day spans this whole segment.
     const covered = sessions.some(
       (s) => toMinutes(s.start) <= startMin && toMinutes(s.end) >= endMin,
     );
 
-    // A short uncovered sliver is changeover, not lunch. Keep it as a class
-    // segment so it renders as an empty cell rather than a "Break" divider.
+    // A short uncovered sliver is changeover, not lunch — keep it as a class
+    // segment so it renders as an empty cell rather than a break divider.
     const isBreak = !covered && endMin - startMin >= BREAK_THRESHOLD_MINUTES;
 
     raw.push({
@@ -241,8 +244,8 @@ function buildSegments(sessions: Session[]): Segment[] {
     });
   }
 
-  // Merge consecutive breaks. A sparse first-year timetable would otherwise
-  // render three dividers where one long lunch exists.
+  // Merge consecutive breaks: a sparse timetable would otherwise render three
+  // dividers where one long lunch exists.
   const merged: Segment[] = [];
   for (const seg of raw) {
     const last = merged[merged.length - 1];
@@ -258,11 +261,11 @@ function buildSegments(sessions: Session[]): Segment[] {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 4 — Placing a day's sessions across the segments
+// SECTION 4 — Placing a day's sessions
 //
-// ★ DURATION BECOMES WIDTH. A session spans every segment it covers, exactly
-//   like a Gantt bar — including any break segment it straddles, because a
-//   class running through lunch really does run through lunch.
+// ★ DURATION BECOMES WIDTH. A session spans every segment it covers, like a
+//   Gantt bar — including any break it straddles, because a class running
+//   through lunch really does run through lunch.
 // -----------------------------------------------------------------------------
 
 interface Cell {
@@ -270,7 +273,6 @@ interface Cell {
   span: number;
   sessions: Session[];
   key: string;
-  /** Only set for break cells, for the tooltip. */
   label?: string;
 }
 
@@ -280,7 +282,6 @@ function placeDay(segments: Segment[], daySessions: Session[]): Cell[] {
 
   while (i < segments.length) {
     const seg = segments[i];
-
     const starting = daySessions.filter(
       (s) => toMinutes(s.start) === seg.startMin,
     );
@@ -315,7 +316,7 @@ function placeDay(segments: Segment[], daySessions: Session[]): Cell[] {
     }
 
     // Free for this day, but other days have class here. Spec §7.2: the slot
-    // stays and this day gets an EMPTY CELL, visually distinct from a break.
+    // stays and this day gets an empty cell, visually distinct from a break.
     cells.push({ kind: 'empty', span: 1, sessions: [], key: `e${i}` });
     i += 1;
   }
@@ -329,18 +330,13 @@ function placeDay(segments: Segment[], daySessions: Session[]): Cell[] {
 // -----------------------------------------------------------------------------
 
 export interface WeekStripProps {
-  /** Any date inside the week to display. Defaults to today. */
   anchorDate?: ISODate;
-  /** Day label tapped — the marking list below should jump to this date. */
   onSelectDay?: (date: ISODate) => void;
-  /** Currently selected day in the marking list, echoed here. */
   selectedDate?: ISODate;
   /**
-   * Store revision.
-   *
    * ⚠ Not decorative. The strip reads generated sessions, memoised by
-   *   DataVersion — without this in the dependency list a mark made below
-   *   would not repaint the tile above it.
+   *   DataVersion — without this in the dependency list a mark made below would
+   *   not repaint the tile above it.
    */
   revision?: number;
 }
@@ -356,7 +352,7 @@ export default function WeekStrip(props: WeekStripProps) {
   const workingDays = settings.college.workingDays;
 
   const model = useMemo(() => {
-    void revision; // recompute whenever the store changes
+    void revision;
 
     const weekStart = weekStartFor(anchor);
     const weekEnd = addDays(weekStart, 6);
@@ -396,11 +392,10 @@ export default function WeekStrip(props: WeekStripProps) {
     };
   }, [anchor, year, workingDays, today, revision]);
 
-  // ---- empty state ---------------------------------------------------------
   if (model.segments.length === 0) {
     return (
       <section className="card p-5 text-center">
-        <p className="text-sm text-[--color-ink-muted]">
+        <p className="text-sm text-ink-muted">
           {model.isCurrentWeek
             ? 'No classes this week. Add your timetable in setup to see it here.'
             : 'No classes that week.'}
@@ -410,29 +405,24 @@ export default function WeekStrip(props: WeekStripProps) {
   }
 
   /**
-   * ★ WIDTH ∝ DURATION.
+   * ★ WIDTH ∝ DURATION. Class segments get fr units equal to their minute count,
+   *   so a 150-minute posting is 2.5× the width of a 60-minute lecture. The
+   *   minmax floor keeps short segments legible; once the total exceeds the
+   *   container the wrapper scrolls, which is the point of this orientation.
    *
-   * Class segments get fr units equal to their minute count, so a 150-minute
-   * posting is two and a half times the width of a 60-minute lecture. The
-   * minmax floor keeps a short segment tappable and the subject code legible;
-   * once the total exceeds the container the wrapper scrolls sideways, which is
-   * the entire reason for this orientation.
-   *
-   * Breaks are FIXED and narrow. They must be visible — the earlier 6px version
-   * was indistinguishable from nothing — but must never win space from a class.
+   *   Breaks are fixed and narrow: visible, but never winning space from a class.
    */
   const template = [
     '2.5rem',
     ...model.segments.map((seg) =>
       seg.kind === 'break'
         ? '1.5rem'
-        : `minmax(2.5rem, ${seg.endMin - seg.startMin}fr)`,
+        : `minmax(2.75rem, ${seg.endMin - seg.startMin}fr)`,
     ),
   ].join(' ');
 
   return (
     <section className="card overflow-hidden p-3">
-      {/* ---- header ---- */}
       <div className="mb-2.5 flex items-center justify-between gap-2 px-1">
         <span className="eyebrow">
           {model.isCurrentWeek
@@ -452,31 +442,27 @@ export default function WeekStrip(props: WeekStripProps) {
           {/* ---- time header ---- */}
           <div className="grid gap-1" style={{ gridTemplateColumns: template }}>
             <div aria-hidden />
-            {model.segments.map((seg, i) => {
-              if (seg.kind === 'break') {
-                return (
-                  <span
-                    key={`h${i}`}
-                    title={`Break · ${formatTime(seg.startMin)} – ${formatTime(seg.endMin)}`}
-                    className="text-center text-[0.5rem] font-medium leading-none text-[--color-ink-faint]"
-                  >
-                    {formatDuration(seg.endMin - seg.startMin)}
-                  </span>
-                );
-              }
-
-              // Label only where a class actually begins. Mid-session
-              // boundaries created by an overlapping posting would otherwise
-              // print times that no class starts at.
-              return (
+            {model.segments.map((seg, i) =>
+              seg.kind === 'break' ? (
                 <span
                   key={`h${i}`}
-                  className="tnum truncate text-center text-[0.625rem] font-medium leading-none text-[--color-ink-muted]"
+                  title={`Break · ${formatTime(seg.startMin)} – ${formatTime(seg.endMin)}`}
+                  className="text-center text-[0.5rem] font-medium leading-none text-ink-faint"
                 >
+                  {formatDuration(seg.endMin - seg.startMin)}
+                </span>
+              ) : (
+                <span
+                  key={`h${i}`}
+                  className="tnum truncate text-center text-[0.625rem] font-medium leading-none text-ink-muted"
+                >
+                  {/* Label only where a class actually begins. Mid-session
+                      boundaries from an overlapping posting would otherwise
+                      print times that no class starts at. */}
                   {seg.isSessionStart ? formatTime(seg.startMin) : ''}
                 </span>
-              );
-            })}
+              ),
+            )}
           </div>
 
           {/* ---- one row per working day ---- */}
@@ -490,10 +476,10 @@ export default function WeekStrip(props: WeekStripProps) {
                   key={day.date}
                   className={`grid items-stretch gap-1 rounded-lg ${
                     day.isToday ? 'day-today' : ''
-                  } ${isSelected && !day.isToday ? 'bg-[--color-surface-sunk]' : ''}`}
+                  } ${isSelected && !day.isToday ? 'bg-surface-sunk' : ''}`}
                   style={{ gridTemplateColumns: template }}
                 >
-                  {/* ---- day label, doubles as the jump control ---- */}
+                  {/* day label doubles as the jump control */}
                   <button
                     type="button"
                     onClick={() => onSelectDay?.(day.date)}
@@ -503,9 +489,7 @@ export default function WeekStrip(props: WeekStripProps) {
                   >
                     <span
                       className={`text-[0.5625rem] font-semibold uppercase tracking-wide ${
-                        day.isToday
-                          ? 'text-[--color-brand-ink]'
-                          : 'text-[--color-ink-faint]'
+                        day.isToday ? 'text-brand-ink' : 'text-ink-faint'
                       }`}
                     >
                       {DAY_NAMES_SHORT[day.dayIndex]}
@@ -513,8 +497,8 @@ export default function WeekStrip(props: WeekStripProps) {
                     <span
                       className={`tnum mt-0.5 text-[0.6875rem] ${
                         day.isToday
-                          ? 'font-semibold text-[--color-brand-ink]'
-                          : 'text-[--color-ink-muted]'
+                          ? 'font-semibold text-brand-ink'
+                          : 'text-ink-muted'
                       }`}
                     >
                       {Number(day.date.slice(8, 10))}
@@ -524,8 +508,6 @@ export default function WeekStrip(props: WeekStripProps) {
                   {/* ---- cells ---- */}
                   {cells.map((cell) => {
                     if (cell.kind === 'break') {
-                      // A visible dashed rule. Narrow, quiet, unmistakably a
-                      // gap rather than an unmarked class.
                       return (
                         <div
                           key={`${day.date}-${cell.key}`}
@@ -533,7 +515,7 @@ export default function WeekStrip(props: WeekStripProps) {
                           className="flex items-center justify-center"
                           style={{ gridColumn: `span ${cell.span}` }}
                         >
-                          <span className="h-full w-px border-l border-dashed border-[--color-line-strong]" />
+                          <span className="h-full w-px border-l border-dashed border-line-strong" />
                         </div>
                       );
                     }
@@ -571,14 +553,30 @@ export default function WeekStrip(props: WeekStripProps) {
       </div>
 
       {/* ---- legend ----
-          Permanent, and worth the space. The grey scale is the one part of this
-          design nobody guesses correctly on first sight. */}
-      <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t border-[--color-line] pt-2.5 text-[0.625rem] text-[--color-ink-faint]">
-        <LegendDot className="tile-present" label="Present" />
-        <LegendDot className="tile-absent" label="Absent" />
-        <LegendDot className="tile-unmarked" label="Not marked" />
-        <LegendDot className="tile-future" label="Upcoming" />
-        <LegendDot className="tile-cancelled" label="Cancelled" />
+          TWO ROWS, because tiles carry two independent signals. Fill = status,
+          stripe and letter = type. Merging them into one row would imply they
+          were the same scale, which is exactly the confusion to avoid. */}
+      <div className="mt-3 border-t border-line pt-2.5">
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[0.625rem] text-ink-faint">
+          <LegendDot className="tile-present" label="Present" />
+          <LegendDot className="tile-absent" label="Absent" />
+          <LegendDot className="tile-unmarked" label="Not marked" />
+          <LegendDot className="tile-future" label="Upcoming" />
+          <LegendDot className="tile-cancelled" label="Cancelled" />
+        </div>
+
+        <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[0.625rem] text-ink-faint">
+          {(['theory', 'practical', 'clinical'] as ClassCategory[]).map((c) => (
+            <span key={c} className="inline-flex items-center gap-1">
+              <span
+                className="inline-block h-2.5 w-1 rounded-sm"
+                style={{ backgroundColor: CATEGORY_STRIPE[c] }}
+                aria-hidden
+              />
+              {CATEGORY_LETTER[c]} · {CATEGORY_WORD[c]}
+            </span>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -588,15 +586,24 @@ export default function WeekStrip(props: WeekStripProps) {
 // -----------------------------------------------------------------------------
 // SECTION 6 — One session tile
 //
-// ★ SEGMENT COUNT EQUALS WEIGHT (spec §4.8).
+// ★ SEGMENT COUNT EQUALS WEIGHT (spec §4.8). A 3-hour posting logged as ONE
+//   class draws a single bar; counted as THREE it draws three side by side. The
+//   marking list still shows one row and one tap — the student marks what they
+//   did, and sees what it costs.
 //
-//   A 3-hour posting logged as ONE class draws a single bar. Counted as THREE
-//   it draws three side by side. The marking list still shows one row and one
-//   tap — same session, two renderings. The student marks what they did (one
-//   posting) and sees what it costs (three classes).
+// ★ CLASS TYPE IS ON THE TILE, AND IT IS NOT THE FILL.
 //
-//   The subject code is overlaid across the whole cell rather than printed on
-//   each segment: three narrow segments cannot each hold "Surg".
+//   ⚠ The obvious fix is the wrong one. Colouring tiles by category cannot work
+//     here: practical green is the SAME green as "present", so every practical
+//     would read as attended merely by existing. Status must keep the fill — it
+//     is the louder question in this component.
+//
+//   So type rides on two quieter channels, both of which survive a 40px tile:
+//     1. a 3px LEFT STRIPE in the category colour — instant group marker, costs
+//        no horizontal space, never competes with the fill
+//     2. a LETTER BADGE (T / P / C) at the right edge — redundant on purpose,
+//        because colour alone fails for a colour-blind student and one letter is
+//        legible where a second word is not
 // -----------------------------------------------------------------------------
 
 function SessionTile(props: { session: Session; status: WeekTileStatus }) {
@@ -609,21 +616,41 @@ function SessionTile(props: { session: Session; status: WeekTileStatus }) {
   const startMin = toMinutes(session.start);
   const endMin = toMinutes(session.end);
 
-  const title = `${session.subjectName} · ${session.category} · ${formatTime(
+  const title = `${session.subjectName} · ${CATEGORY_WORD[session.category]} · ${formatTime(
     startMin,
   )} – ${formatTime(endMin)} · ${formatDuration(endMin - startMin)}${
     count > 1 ? ` · counts as ${count}` : ''
   }`;
 
+  /**
+   * Inline style, not a utility class. `.tile` already sets a transparent border
+   * on all four sides, so overriding only the left edge keeps the box model
+   * identical whatever the category — no shifting between a theory tile and a
+   * clinical one.
+   */
+  const stripe = {
+    borderLeftWidth: '3px',
+    borderLeftColor: CATEGORY_STRIPE[session.category],
+  } as const;
+
   if (count === 1) {
     return (
       <div
         title={title}
-        className={`tile ${TILE_CLASS[status]} ${
+        style={stripe}
+        className={`tile relative ${TILE_CLASS[status]} ${
           isOffTimetable ? 'tile-offgrid' : ''
-        } min-h-[1.75rem] flex-1 px-1`}
+        } min-h-[1.75rem] flex-1 pl-1.5 pr-3.5`}
       >
-        {code}
+        <span className="truncate">{code}</span>
+        {/* Takes the fill's text colour and is knocked back — a second coloured
+            element inside a coloured tile is noise. */}
+        <span
+          className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[0.5rem] font-bold uppercase opacity-70"
+          aria-hidden
+        >
+          {CATEGORY_LETTER[session.category]}
+        </span>
       </div>
     );
   }
@@ -633,6 +660,9 @@ function SessionTile(props: { session: Session; status: WeekTileStatus }) {
       {Array.from({ length: count }, (_, i) => (
         <div
           key={i}
+          /* Stripe on the first segment only. Repeating it would read as three
+             separate classes rather than one weighted block. */
+          style={i === 0 ? stripe : undefined}
           className={`tile ${TILE_CLASS[status]} ${
             isOffTimetable ? 'tile-offgrid' : ''
           } flex-1`}
@@ -642,6 +672,12 @@ function SessionTile(props: { session: Session; status: WeekTileStatus }) {
         className={`pointer-events-none absolute inset-0 flex items-center justify-center text-[0.625rem] font-semibold ${LABEL_CLASS[status]}`}
       >
         {code}
+      </span>
+      <span
+        className={`pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[0.5rem] font-bold uppercase opacity-70 ${LABEL_CLASS[status]}`}
+        aria-hidden
+      >
+        {CATEGORY_LETTER[session.category]}
       </span>
     </div>
   );
@@ -663,17 +699,4 @@ function LegendDot(props: { className: string; label: string }) {
       {props.label}
     </span>
   );
-}
-
-/** "22–27 Sept". Shown only when viewing a week other than the current one. */
-function formatRange(start: ISODate, end: ISODate): string {
-  const s = new Date(`${start}T00:00:00`);
-  const e = new Date(`${end}T00:00:00`);
-
-  const startMonth = s.toLocaleDateString(undefined, { month: 'short' });
-  const endMonth = e.toLocaleDateString(undefined, { month: 'short' });
-
-  return s.getMonth() === e.getMonth()
-    ? `${s.getDate()}–${e.getDate()} ${endMonth}`
-    : `${s.getDate()} ${startMonth} – ${e.getDate()} ${endMonth}`;
 }

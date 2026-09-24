@@ -3,37 +3,38 @@
 // =============================================================================
 // app/attendance/components/RingGrid.tsx
 // -----------------------------------------------------------------------------
-// The resting view. Two concentric rings per subject, no numbers until asked.
+// One ring per class type. Fuller ring = better attendance. That is the whole
+// idea, and the code is deliberately no cleverer than that sentence.
 //
-//   OUTER ARC = theory                     --color-theory
-//   INNER ARC = practical or clinical      --color-practical / --color-clinical
-//   TRACK     = the unfilled remainder     --color-ring-track
-//   TICK      = the threshold, ON the track
-//   LABEL     = safety band, in words and colour
-//
-//   arc past tick → safe.  arc short of it → the gap is the size of the problem.
-//
-// ★ RING COLOUR IS IDENTITY, ALWAYS. It never changes with safety. If the arc
-//   went red below threshold you would lose the ability to tell theory from
-//   practical at exactly the moment it matters — they have DIFFERENT thresholds
-//   and one can fail while the other is fine.
+//     fraction = attended / conducted        →  how much of the ring is filled
+//     track    = the rest, in grey           →  the part you did not attend
+//     tick     = the threshold               →  past it is safe
 //
 // ═════════════════════════════════════════════════════════════════════════════
-//  ★ TWO FIXES IN THIS REVISION
+//  ⚠ WHY THIS FILE IS NOW SELF-CONTAINED — THREE BUGS, ONE ROOT CAUSE
 // ═════════════════════════════════════════════════════════════════════════════
+// Every ring bug so far came from INDIRECTION, not from the maths:
 //
-//  1. THE TRACK IS NOW VISIBLE.
-//     It was #e9e5de on a #fbfaf7 canvas — a 4% luminance difference, invisible
-//     on a phone in daylight. A subject at 20% looked identical to a broken
-//     component. The track is not decoration: it is the DENOMINATOR made
-//     visible, and without it the arc means nothing. It is also stroked
-//     slightly WIDER than the arc, so the filled portion sits in a groove.
+//   1. Arcs drew as full circles because the code fed `result.ratio` into a
+//      function expecting 0–1, while `ratio` actually carries 0–100. Everything
+//      clamped to 1. A student at 34% and one at 98% got identical rings — the
+//      worst kind of bug, because it does not look broken, it looks reassuring.
 //
-//  2. THE DETAIL VIEW IS A REAL MODAL.
-//     It used to be a card appended below the grid. That pushed the page
-//     around, left the background fully legible and competing for attention,
-//     and gave no signal you were in a temporary state. Now: centred, dimmed,
-//     backdrop BLURRED, spring entry, Escape to close, background scroll locked.
+//   2. Colours vanished because `stroke` came from CSS classes like
+//      `.ring-theory`, and a token rename or a Tailwind v4 change breaks those
+//      SILENTLY. No error, no warning, just a grey circle.
+//
+//   3. The grey track was invisible against the warm canvas — a 4% luminance
+//      difference. The denominator disappeared, so the arc meant nothing.
+//
+// THE FIX FOR ALL THREE IS THE SAME: this component now computes its own
+// fraction from two integers, and paints its own colours from constants defined
+// twelve lines below. It reads exactly three fields off CategoryResult —
+// attended, conducted, threshold — plus band and percentDisplay for the label
+// and modal. Nothing else can break it.
+//
+// ★ DO NOT reintroduce `ratio` or `percentDisplay` into the geometry.
+//   attended/conducted is exact, unrounded, and cannot be in the wrong units.
 // ═════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -41,34 +42,85 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CategoryResult,
   ClassCategory,
-  RingGridArrangement,
   SafetyBand,
   SubjectResult,
 } from '../types';
-import { RING_MIN_DIAMETER_PX } from '../types';
 import { statusLine } from '../calculate';
 
 
 // -----------------------------------------------------------------------------
-// SECTION 1 — Band name mapping
+// SECTION 1 — Colours
 //
-// ⚠ types.ts and globals.css disagree on the middle two names. Both are
-//   reasonable, so the translation lives HERE and nowhere else.
-//     types.ts    : safe | warning | danger | critical
-//     globals.css : safe | watch   | risk   | critical
+// ★ HARD-CODED ON PURPOSE. These are the single source of truth for ring colour
+//   and they are passed to SVG as literal `stroke` values. No CSS class, no
+//   theme token, no Tailwind utility — nothing that can resolve to empty.
 //
-//   Never write `ring-label-${band}` inline — `ring-label-warning` does not
-//   exist and renders with no colour and no error.
+// PURPLE and ORANGE, chosen over the old blue/green pair for three reasons:
+//   • neither collides with the green that means "present" elsewhere in the app
+//   • they sit on opposite sides of the wheel, so two adjacent rings never
+//     blend at 7px stroke on a phone
+//   • both stay distinguishable under the most common colour-blindness types,
+//     where blue/green does not
+//
+// EACH RING HAS ITS OWN TRACK GREY. This is the part that was missing. Two rings
+// with the same grey track look like one thick grey band when both are nearly
+// empty — you cannot tell where theory ends and practical begins. The theory
+// track is deliberately DARKER, matching the fact that its arc is the darker of
+// the two, so each ring reads as one object rather than two unrelated layers.
 // -----------------------------------------------------------------------------
 
-const BAND_CLASS: Record<SafetyBand, string> = {
-  safe: 'ring-label-safe',
-  warning: 'ring-label-watch',
-  danger: 'ring-label-risk',
-  critical: 'ring-label-critical',
+interface RingPalette {
+  /** The filled arc — what you attended. */
+  arc: string;
+  /** The unfilled remainder — what you missed. Distinct per category. */
+  track: string;
+  /** Dot used in the key and the modal. */
+  dot: string;
+}
+
+const PALETTE: Record<ClassCategory, RingPalette> = {
+  theory: {
+    arc: '#7c3aed',    // violet 600
+    track: '#cfc7dd',  // darker, cool-tinted grey — pairs with the violet
+    dot: '#7c3aed',
+  },
+  practical: {
+    arc: '#ea580c',    // orange 600
+    track: '#e6d9cd',  // lighter, warm-tinted grey — pairs with the orange
+    dot: '#ea580c',
+  },
+  clinical: {
+    arc: '#0891b2',    // cyan 600 — only appears in clinical years
+    track: '#c9dbe0',
+    dot: '#0891b2',
+  },
 };
 
-/** Chip variant for the modal header. Same mapping problem, same solution. */
+/** Dashed ring for a category with no classes conducted yet. */
+const EMPTY_STROKE = '#c9c2b6';
+
+/** The threshold marker. Dark, neutral, deliberately not a category colour. */
+const TICK_STROKE = '#6b6478';
+
+
+// -----------------------------------------------------------------------------
+// SECTION 2 — Band and category labels
+//
+// ⚠ types.ts and globals.css disagree on the middle two band names:
+//     types.ts    : safe | warning | danger | critical
+//     globals.css : safe | watch   | risk   | critical
+//   Both are reasonable, so the translation lives here and nowhere else.
+//   Never write `ring-label-${band}` inline — `ring-label-warning` does not
+//   exist, renders with no colour, and reports no error.
+// -----------------------------------------------------------------------------
+
+const BAND_TEXT: Record<SafetyBand, string> = {
+  safe: '#0f9b6c',
+  warning: '#c2870b',
+  danger: '#dd6b20',
+  critical: '#d64550',
+};
+
 const BAND_CHIP: Record<SafetyBand, string> = {
   safe: 'chip-safe',
   warning: 'chip-watch',
@@ -92,132 +144,93 @@ const BAND_ORDER: Record<SafetyBand, number> = {
   safe: 3,
 };
 
-const ARC_CLASS: Record<ClassCategory, string> = {
-  theory: 'ring-theory',
-  practical: 'ring-practical',
-  clinical: 'ring-clinical',
-};
-
 const CATEGORY_LABEL: Record<ClassCategory, string> = {
   theory: 'Theory',
   practical: 'Practical',
   clinical: 'Clinical',
 };
 
-const CATEGORY_VAR: Record<ClassCategory, string> = {
-  theory: 'var(--color-theory)',
-  practical: 'var(--color-practical)',
-  clinical: 'var(--color-clinical)',
-};
+/**
+ * Drawing order, outside in. Theory is always outermost because every subject
+ * has it — so the outer ring means the same thing on every tile in the grid,
+ * which is what makes them comparable at a glance.
+ */
+const CATEGORY_ORDER: ClassCategory[] = ['theory', 'practical', 'clinical'];
 
 
 // -----------------------------------------------------------------------------
-// SECTION 2 — Arrangement
-//
-// The rings are a FIXED size. What changes is how many sit in a row. A
-// first-year with 8 subjects and a final-year with 4 both get rings they can
-// actually read — that is the whole point of not scaling to fit.
+// SECTION 3 — The maths. All of it.
 // -----------------------------------------------------------------------------
 
-function arrangementFor(count: number): RingGridArrangement {
-  if (count <= 2) return 'single';
-  if (count === 3) return 'row-3';
-  if (count === 4) return 'grid-2x2';
-  if (count <= 6) return 'grid-3x2';
-  return 'scroll-3';
+/**
+ * ★ HOW FULL THE RING IS. Nothing else feeds the geometry.
+ *
+ * Two integers in, one 0–1 fraction out. No rounding, no unit conversion, no
+ * dependency on any other field.
+ */
+function fractionOf(c: CategoryResult): number {
+  const conducted = c.conducted ?? 0;
+  const attended = c.attended ?? 0;
+  if (conducted <= 0) return 0;
+  const f = attended / conducted;
+  return Number.isFinite(f) ? Math.min(1, Math.max(0, f)) : 0;
 }
 
-const GRID_CLASS: Record<RingGridArrangement, string> = {
-  single: 'grid-cols-2',
-  'row-3': 'grid-cols-3',
-  'grid-2x2': 'grid-cols-2',
-  'grid-3x2': 'grid-cols-3',
-  'scroll-3': 'grid-cols-3',
-};
-
-function diameterFor(arrangement: RingGridArrangement): number {
-  return arrangement === 'single' ? 148 : Math.max(RING_MIN_DIAMETER_PX, 108);
-}
-
-
-// -----------------------------------------------------------------------------
-// SECTION 3 — Arc geometry
-//
-// ★ DRAWN FROM `ratio`, NEVER FROM `percentDisplay`.
-//
-//   percentDisplay is rounded for reading. Using it here would reintroduce the
-//   v3 rounding bug in pixel form: a student on 74.96% would see an arc landing
-//   exactly on the tick and conclude they were safe. The geometry has to be as
-//   honest as the arithmetic.
-// -----------------------------------------------------------------------------
-
-function arcOffset(circumference: number, ratio: number): number {
-  const clamped = Math.min(1, Math.max(0, ratio));
-  return circumference * (1 - clamped);
+function hasClasses(c: CategoryResult): boolean {
+  return (c.conducted ?? 0) > 0;
 }
 
 /**
- * The threshold tick: a short radial line sitting ON the track.
+ * The threshold tick, placed on the track.
  *
- * Arcs start at 12 o'clock and run clockwise, so the angle is measured from
- * -90°. Without that offset every tick lands a quarter-turn out and the entire
- * grid quietly lies.
+ * Arcs start at 12 o'clock and run clockwise, so angles are measured from -90°.
+ * Without that offset every tick lands a quarter-turn out and the grid quietly
+ * lies about where the pass mark is.
  */
-function tickFor(
+function tickCoords(
   cx: number,
   cy: number,
   radius: number,
-  threshold: number,
+  thresholdPercent: number,
   width: number,
 ) {
-  const angle = ((threshold / 100) * 360 - 90) * (Math.PI / 180);
-  const inner = radius - width / 2 - 1.5;
-  const outer = radius + width / 2 + 1.5;
+  const angle = ((thresholdPercent / 100) * 360 - 90) * (Math.PI / 180);
+  const r1 = radius - width / 2 - 2;
+  const r2 = radius + width / 2 + 2;
   return {
-    x1: cx + inner * Math.cos(angle),
-    y1: cy + inner * Math.sin(angle),
-    x2: cx + outer * Math.cos(angle),
-    y2: cy + outer * Math.sin(angle),
+    x1: cx + r1 * Math.cos(angle),
+    y1: cy + r1 * Math.sin(angle),
+    x2: cx + r2 * Math.cos(angle),
+    y2: cy + r2 * Math.sin(angle),
   };
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 4 — Which two categories get rings?
+// SECTION 4 — Which rings does a subject get?
 //
 // ⚠ TRAP 9 — only what is REAL. The curriculum says what is POSSIBLE; this
-//   reads what the student actually has data for. A subject with theory only
-//   draws one ring, not one ring plus an empty circle implying a missing
-//   practical they were never meant to have.
+//   draws what the student actually has. A theory-only subject gets one ring,
+//   not one ring plus an empty circle implying a missing practical.
 //
-// Theory is always outer. Practical and clinical are mutually exclusive in this
-// curriculum, so whichever exists takes the inner position.
+// ★ NO PAIRING LOGIC. An earlier version picked "one theory + one other", which
+//   could silently drop a subject's only real category and then render it as
+//   "no data" beside a Critical label — the component contradicting itself.
 // -----------------------------------------------------------------------------
 
-interface RingPair {
-  outer: CategoryResult | null;
-  inner: CategoryResult | null;
+function ringsFor(subject: SubjectResult): CategoryResult[] {
+  return CATEGORY_ORDER.map((cat) =>
+    subject.categories.find((c) => c.category === cat),
+  ).filter((c): c is CategoryResult => Boolean(c));
 }
 
-function ringPairFor(subject: SubjectResult): RingPair {
-  const cats = subject.categories;
-  return {
-    outer: cats.find((c) => c.category === 'theory') ?? null,
-    inner:
-      cats.find((c) => c.category === 'practical') ??
-      cats.find((c) => c.category === 'clinical') ??
-      null,
-  };
-}
-
-/** Has this subject any conducted classes at all? Drives the "not started" look. */
-function hasAnyData(subject: SubjectResult): boolean {
-  return subject.categories.some((c) => !c.isEmpty);
+function subjectHasData(subject: SubjectResult): boolean {
+  return subject.categories.some(hasClasses);
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 5 — Component
+// SECTION 5 — Grid
 // -----------------------------------------------------------------------------
 
 export interface RingGridProps {
@@ -229,14 +242,15 @@ export interface RingGridProps {
 export default function RingGrid(props: RingGridProps) {
   const { subjects, revision } = props;
 
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const close = useCallback(() => setOpenId(null), []);
 
-  // Worst first, then subjects with no data, then alphabetical inside a band.
+  // Worst first, subjects with no data last, alphabetical inside a band.
   const ordered = useMemo(() => {
     void revision;
     return [...subjects].sort((a, b) => {
-      const aEmpty = hasAnyData(a) ? 0 : 1;
-      const bEmpty = hasAnyData(b) ? 0 : 1;
+      const aEmpty = subjectHasData(a) ? 0 : 1;
+      const bEmpty = subjectHasData(b) ? 0 : 1;
       if (aEmpty !== bEmpty) return aEmpty - bEmpty;
 
       const byBand = BAND_ORDER[a.worstBand] - BAND_ORDER[b.worstBand];
@@ -246,16 +260,28 @@ export default function RingGrid(props: RingGridProps) {
     });
   }, [subjects, revision]);
 
-  const arrangement = arrangementFor(ordered.length);
-  const diameter = diameterFor(arrangement);
+  /**
+   * Rings are a FIXED size — never scaled down to fit more subjects. Below
+   * about 96px two concentric arcs stop being separable and the whole idea
+   * collapses. What changes is how many sit in a row.
+   */
+  const columns = ordered.length <= 2 ? 2 : ordered.length === 4 ? 2 : 3;
+  const diameter = ordered.length <= 2 ? 150 : 112;
 
-  const expanded = ordered.find((s) => s.subjectId === expandedId) ?? null;
-  const close = useCallback(() => setExpandedId(null), []);
+  // Only categories actually in use this year. A first-year should not be shown
+  // a "Clinical" key for something they will not meet for two more years.
+  const legend = useMemo(() => {
+    const present = new Set<ClassCategory>();
+    ordered.forEach((s) => s.categories.forEach((c) => present.add(c.category)));
+    return CATEGORY_ORDER.filter((c) => present.has(c));
+  }, [ordered]);
+
+  const open = ordered.find((s) => s.subjectId === openId) ?? null;
 
   if (ordered.length === 0) {
     return (
       <section className="card p-6 text-center">
-        <p className="text-sm text-[--color-ink-muted]">
+        <p className="text-sm text-ink-muted">
           No subjects tracked yet. Add your timetable in setup.
         </p>
       </section>
@@ -264,109 +290,124 @@ export default function RingGrid(props: RingGridProps) {
 
   return (
     <>
+      {/* ---- category key ----
+          Replaces the paragraph of explanation that used to sit here. Coloured
+          dots do the same job in a fifth of the space, and the same colours key
+          the week strip above — one visual language for class type. */}
+      <div className="mb-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
+        {legend.map((cat) => (
+          <span
+            key={cat}
+            className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium text-ink-muted"
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: PALETTE[cat].dot }}
+              aria-hidden
+            />
+            {CATEGORY_LABEL[cat]}
+          </span>
+        ))}
+      </div>
+
       <div
-        className={`grid justify-items-center gap-x-3 gap-y-6 ${GRID_CLASS[arrangement]}`}
+        className="grid justify-items-center gap-x-3 gap-y-6"
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
       >
         {ordered.map((subject) => (
-          <SubjectRings
+          <SubjectTile
             key={subject.subjectId}
             subject={subject}
             diameter={diameter}
-            isExpanded={subject.subjectId === expandedId}
-            onOpen={() => setExpandedId(subject.subjectId)}
+            onOpen={() => setOpenId(subject.subjectId)}
           />
         ))}
       </div>
 
-      {/* Numbers live in the modal and nowhere else. The resting grid stays
-          shape and colour — the moment a figure appears in the grid itself,
-          someone reads it as an overall standing. */}
-      {expanded && <SubjectModal subject={expanded} onClose={close} />}
+      {/* Numbers live in the modal and nowhere else. The moment a figure appears
+          in the grid itself, someone reads it as an overall standing. */}
+      {open && <SubjectModal subject={open} onClose={close} />}
     </>
   );
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 6 — One subject's ring pair
+// SECTION 6 — One subject
 // -----------------------------------------------------------------------------
 
-function SubjectRings(props: {
+function SubjectTile(props: {
   subject: SubjectResult;
   diameter: number;
-  isExpanded: boolean;
   onOpen: () => void;
 }) {
-  const { subject, diameter, isExpanded, onOpen } = props;
+  const { subject, diameter, onOpen } = props;
 
-  const { outer, inner } = ringPairFor(subject);
-  const started = hasAnyData(subject);
+  const rings = ringsFor(subject);
+  const started = subjectHasData(subject);
 
   const cx = diameter / 2;
   const cy = diameter / 2;
 
-  // Stroke scales gently with size; the 9px radial gap does not. Keeping the
-  // rings CLOSE is what makes the two arcs comparable by eye despite the outer
-  // one being physically longer.
-  const width = diameter >= 140 ? 11 : 9;
-  const outerRadius = cx - width / 2 - 3;
-  const innerRadius = outerRadius - width - 9;
+  /**
+   * Stroke and gap adapt to ring count so a three-ring subject stays legible
+   * without shrinking a two-ring one.
+   *
+   * ⚠ The innermost radius must stay above ~16px. Closer than that and the arcs
+   *   smear into a single band.
+   */
+  const width = rings.length >= 3 ? 8 : diameter >= 140 ? 13 : 11;
+  const gap = rings.length >= 3 ? 4 : 6;
+  const outerRadius = cx - width / 2 - 2;
 
-  const isMuted = subject.isExcluded;
-  const labelClass =
-    isMuted || !started ? 'ring-label-muted' : BAND_CLASS[subject.worstBand];
+  const muted = subject.isExcluded;
+  const labelColor = muted || !started
+    ? '#a8a2b3'
+    : BAND_TEXT[subject.worstBand];
 
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-haspopup="dialog"
-      aria-expanded={isExpanded}
       aria-label={`${subject.subjectName} — ${
         started ? BAND_WORD[subject.worstBand] : 'not started'
       }`}
-      className="flex w-full flex-col items-center gap-2 rounded-[--radius-card] p-1 transition-transform active:scale-[0.97]"
+      className="flex w-full flex-col items-center gap-2 rounded-card p-1 transition-transform active:scale-[0.97]"
     >
       <div className="relative" style={{ width: diameter, height: diameter }}>
         <svg
           width={diameter}
           height={diameter}
           viewBox={`0 0 ${diameter} ${diameter}`}
-          /* -90° puts 12 o'clock at the start of both arcs. */
+          /* -90° puts 12 o'clock at the start of every arc. */
           style={{ transform: 'rotate(-90deg)' }}
           aria-hidden
         >
-          {outer && (
+          {rings.map((result, i) => (
             <Ring
+              key={result.category}
               cx={cx}
               cy={cy}
-              radius={outerRadius}
+              radius={outerRadius - i * (width + gap)}
               width={width}
-              result={outer}
-              muted={isMuted}
+              result={result}
+              muted={muted}
             />
-          )}
-          {inner && (
-            <Ring
-              cx={cx}
-              cy={cy}
-              radius={innerRadius}
-              width={width}
-              result={inner}
-              muted={isMuted}
-            />
-          )}
+          ))}
 
-          {/* A subject with nothing scheduled at all still gets a ring, so the
-              grid never has a hole in it. */}
-          {!outer && !inner && (
+          {/* A subject with nothing scheduled still gets a ring, so the grid
+              never has a hole in it. */}
+          {rings.length === 0 && (
             <circle
-              className="ring-empty"
               cx={cx}
               cy={cy}
               r={outerRadius}
               fill="none"
+              stroke={EMPTY_STROKE}
               strokeWidth={width}
+              strokeDasharray="3 6"
+              strokeLinecap="round"
             />
           )}
         </svg>
@@ -374,19 +415,21 @@ function SubjectRings(props: {
         {/* Centre stays EMPTY once there is data. A number here would be a
             pooled figure by implication — the one thing this rebuild removes. */}
         {!started && (
-          <span className="absolute inset-0 flex items-center justify-center text-[0.625rem] font-medium text-[--color-ink-faint]">
+          <span className="absolute inset-0 flex items-center justify-center text-[0.625rem] font-medium text-ink-faint">
             Not started
           </span>
         )}
       </div>
 
-      {/* ---- label: the ONLY place safety colour appears ---- */}
       <span className="w-full px-0.5 text-center leading-tight">
-        <span className={`block truncate text-xs font-semibold ${labelClass}`}>
+        <span
+          className="block truncate text-xs font-semibold"
+          style={{ color: labelColor }}
+        >
           {subject.subjectName}
         </span>
-        <span className="mt-0.5 block text-[0.625rem] text-[--color-ink-faint]">
-          {isMuted
+        <span className="mt-0.5 block text-[0.625rem] text-ink-faint">
+          {muted
             ? 'Excluded'
             : started
               ? BAND_WORD[subject.worstBand]
@@ -399,11 +442,15 @@ function SubjectRings(props: {
 
 
 /**
- * One arc: track, filled portion, threshold tick.
+ * ONE RING.
  *
- * ★ THE TRACK IS DRAWN FIRST AND SLIGHTLY WIDER than the arc. That extra half
- *   pixel on each side makes the filled portion sit IN a groove rather than
- *   floating on the canvas, which is what sells it as a gauge.
+ *   1. grey track   — the whole circle, so the denominator is always visible
+ *   2. coloured arc — attended/conducted of the way round
+ *   3. threshold tick
+ *
+ * Every colour is an explicit `stroke` attribute. Nothing here depends on a CSS
+ * class existing, which is what makes this the version that cannot silently
+ * render invisible.
  */
 function Ring(props: {
   cx: number;
@@ -415,54 +462,70 @@ function Ring(props: {
 }) {
   const { cx, cy, radius, width, result, muted } = props;
 
+  if (radius < 6) return null; // defensive: too many categories to draw
+
+  const palette = PALETTE[result.category];
   const circumference = 2 * Math.PI * radius;
-  const tick = tickFor(cx, cy, radius, result.threshold, width);
+  const fraction = fractionOf(result);
+  const empty = !hasClasses(result);
+  const tick = tickCoords(cx, cy, radius, result.threshold, width);
 
   return (
     <g opacity={muted ? 0.4 : 1}>
-      {/* ★ THE DENOMINATOR, MADE VISIBLE. Always drawn, always legible. */}
+      {/* ★ THE TRACK — the part you did NOT attend.
+          Each category has its own grey so two adjacent near-empty rings do not
+          merge into one thick grey band. */}
       <circle
-        className="ring-track"
         cx={cx}
         cy={cy}
         r={radius}
         fill="none"
-        strokeWidth={width + 1}
+        stroke={palette.track}
+        strokeWidth={width}
       />
 
-      {result.isEmpty ? (
-        /* Dashed overlay says "nothing here yet". A bare track with no arc
-           just looks like the component failed to load. */
+      {empty ? (
+        /* Dashed overlay says "nothing here yet". A bare track with no arc just
+           looks like the component failed to load. */
         <circle
-          className="ring-empty"
           cx={cx}
           cy={cy}
           r={radius}
           fill="none"
+          stroke={EMPTY_STROKE}
           strokeWidth={width}
+          strokeDasharray="3 6"
+          strokeLinecap="round"
+          opacity={0.7}
         />
       ) : (
-        /* ★ Geometry from the EXACT ratio, never percentDisplay. */
+        /* ★ THE ARC — attended/conducted of the way round. */
         <circle
-          className={`ring-arc ${ARC_CLASS[result.category]}`}
           cx={cx}
           cy={cy}
           r={radius}
           fill="none"
+          stroke={palette.arc}
           strokeWidth={width}
+          strokeLinecap="round"
           strokeDasharray={circumference}
-          strokeDashoffset={arcOffset(circumference, result.ratio)}
+          strokeDashoffset={circumference * (1 - fraction)}
+          style={{
+            transition: 'stroke-dashoffset 480ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
         />
       )}
 
-      {/* The tick is the judgement. Arc past it = safe. Uncoloured on purpose:
+      {/* The tick is the judgement: arc past it means safe. Neutral on purpose —
           a reference line, not another status. */}
       <line
-        className="ring-tick"
         x1={tick.x1}
         y1={tick.y1}
         x2={tick.x2}
         y2={tick.y2}
+        stroke={TICK_STROKE}
+        strokeWidth={2.5}
+        strokeLinecap="round"
       />
     </g>
   );
@@ -472,62 +535,36 @@ function Ring(props: {
 // -----------------------------------------------------------------------------
 // SECTION 7 — Detail modal
 //
-// Every number in this component lives here, and nowhere else.
+// Every number in this component lives here.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  WHY A MODAL AND NOT A CARD BELOW THE GRID
-// ═════════════════════════════════════════════════════════════════════════════
-// The previous version appended a card underneath. Three things were wrong with
-// that, and none of them are cosmetic:
+// WHY A MODAL, NOT A CARD BELOW: an inline card moved the page on every tap,
+// left the background competing for attention, and on a phone often opened
+// off-screen — you tapped a ring and, as far as you could tell, nothing
+// happened. A modal lifts one object above a dimmed, blurred page: the
+// background is visibly still there, but unmistakably inactive.
 //
-//   1. IT MOVED THE PAGE. Content below shifted down on every tap, so the grid
-//      you were reading jumped out from under your thumb.
-//   2. THE BACKGROUND STAYED FULLY LEGIBLE and competed for attention. Nothing
-//      signalled that you were in a temporary, dismissible state.
-//   3. ON A PHONE IT OFTEN OPENED OFF-SCREEN. You tapped a ring and, as far as
-//      you could tell, nothing happened.
-//
-// A modal fixes all three by lifting one object above a dimmed, BLURRED page:
-// the background is visibly still there — so you never feel lost — but
-// unmistakably inactive.
-//
-// FOUR DETAILS THAT MAKE IT FEEL NATIVE RATHER THAN WEB:
-//   • BLUR, not just dim. This is what iOS does and what plain CSS overlays
-//     almost never do. It reads as depth rather than as a grey rectangle.
-//   • SPRING SCALE from 0.94, on the UIKit presentation curve.
-//   • ESCAPE CLOSES IT, and so does a tap on the scrim. Both are expected; only
-//     one is ever implemented.
-//   • BACKGROUND SCROLL IS LOCKED via a body attribute. Without this the page
-//     behind scrolls under the scrim on iOS, which instantly breaks the
-//     illusion of a layer.
-// ═════════════════════════════════════════════════════════════════════════════
+// Escape closes it, a scrim tap closes it, and the page behind is scroll-locked
+// while it is open. All three are expected; usually only one gets built.
+// -----------------------------------------------------------------------------
 
 function SubjectModal(props: { subject: SubjectResult; onClose: () => void }) {
   const { subject, onClose } = props;
-
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Escape to close + lock the page behind. The cleanup runs on unmount, so the
-  // attribute can never be left behind if the component disappears abruptly.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-
     window.addEventListener('keydown', onKey);
     document.body.setAttribute('data-modal-open', 'true');
-
-    // Move focus into the dialog so keyboard and screen-reader users are not
-    // left behind on the grid.
     cardRef.current?.focus();
-
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.removeAttribute('data-modal-open');
     };
   }, [onClose]);
 
-  const started = hasAnyData(subject);
+  const started = subjectHasData(subject);
 
   return (
     <div
@@ -536,17 +573,13 @@ function SubjectModal(props: { subject: SubjectResult; onClose: () => void }) {
       aria-modal="true"
       aria-label={subject.subjectName}
     >
-      {/* Tap anywhere outside to dismiss. aria-hidden because the close button
-          already gives assistive tech an explicit way out. */}
       <div className="modal-scrim" onClick={onClose} aria-hidden />
 
       <div className="modal-card" ref={cardRef} tabIndex={-1}>
-        {/* ---- head ---- */}
-        <div className="modal-head border-b border-[--color-line] px-5 pb-4 pt-5">
+        <div className="modal-head border-b border-line px-5 pb-4 pt-5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="display truncate text-xl">{subject.subjectName}</h3>
-
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {subject.isExcluded ? (
                   <span className="chip chip-neutral">Excluded</span>
@@ -557,10 +590,6 @@ function SubjectModal(props: { subject: SubjectResult; onClose: () => void }) {
                 ) : (
                   <span className="chip chip-neutral">No classes yet</span>
                 )}
-
-                {subject.isExamSubject && (
-                  <span className="chip chip-brand">Exam subject</span>
-                )}
               </div>
             </div>
 
@@ -570,76 +599,69 @@ function SubjectModal(props: { subject: SubjectResult; onClose: () => void }) {
           </div>
 
           {subject.isExcluded && (
-            <p className="mt-3 text-xs leading-relaxed text-[--color-ink-muted]">
-              This subject is excluded from your calculations. It is still being
-              tracked — nothing has been deleted.
+            <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+              Excluded from your calculations. Still tracked — nothing deleted.
             </p>
           )}
         </div>
 
-        {/* ---- body ----
-            Each category is judged against ITS OWN threshold and says so. A
-            student seeing "78%" beside "needs 80%" understands their position
-            instantly; "78%" alone is meaningless. */}
+        {/* Each category is judged against ITS OWN threshold and says so. "78%"
+            beside "needs 80%" is understood instantly; "78%" alone is noise. */}
         <div className="modal-body px-5 py-4">
           <div className="space-y-4">
-            {subject.categories.map((c) => (
-              <div
-                key={c.category}
-                className="border-t border-[--color-line] pt-4 first:border-0 first:pt-0"
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="flex items-center gap-2 text-sm font-medium text-[--color-ink]">
-                    {/* Same colour as the ring it refers to. This dot is the
-                        entire legend — no separate key needed. */}
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: CATEGORY_VAR[c.category] }}
-                      aria-hidden
-                    />
-                    {CATEGORY_LABEL[c.category]}
-                  </span>
+            {ringsFor(subject).map((c) => {
+              const empty = !hasClasses(c);
 
-                  <span className="tnum text-sm">
-                    {c.isEmpty ? (
-                      <span className="text-[--color-ink-faint]">
-                        No classes yet
-                      </span>
-                    ) : (
-                      <>
-                        <span className="text-[--color-ink-muted]">
-                          {c.attended}/{c.conducted}
-                        </span>
-                        <span
-                          className={`ml-2 text-base font-semibold ${BAND_CLASS[c.band]}`}
-                        >
-                          {c.percentDisplay}%
-                        </span>
-                      </>
-                    )}
-                  </span>
+              return (
+                <div
+                  key={c.category}
+                  className="border-t border-line pt-4 first:border-0 first:pt-0"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="flex items-center gap-2 text-sm font-medium text-ink">
+                      {/* Same colour as the ring it describes — this dot is the
+                          entire legend, no separate key needed. */}
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: PALETTE[c.category].dot }}
+                        aria-hidden
+                      />
+                      {CATEGORY_LABEL[c.category]}
+                    </span>
+
+                    <span className="tnum text-sm">
+                      {empty ? (
+                        <span className="text-ink-faint">No classes yet</span>
+                      ) : (
+                        <>
+                          <span className="text-ink-muted">
+                            {c.attended}/{c.conducted}
+                          </span>
+                          <span
+                            className="ml-2 text-base font-semibold"
+                            style={{ color: BAND_TEXT[c.band] }}
+                          >
+                            {c.percentDisplay}%
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* The actionable sentence — "you can miss 3 more", never a
+                      bare number. */}
+                  <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
+                    {statusLine(c)}
+                  </p>
+
+                  <p className="mt-1 text-[0.6875rem] text-ink-faint">
+                    Needs {c.threshold}%
+                    {c.isCustomThreshold ? ' — your setting' : ' — default'}
+                  </p>
                 </div>
-
-                {/* The actionable sentence. "You can miss 3 more" or "attend 4
-                    in a row" — never a bare number. */}
-                <p className="mt-1.5 text-xs leading-relaxed text-[--color-ink-soft]">
-                  {statusLine(c)}
-                </p>
-
-                <p className="mt-1 text-[0.6875rem] text-[--color-ink-faint]">
-                  Needs {c.threshold}%
-                  {c.isCustomThreshold ? ' — your setting' : ' — default'}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
-
-          {/* The one line that explains the whole visual language, placed where
-              someone confused by the rings will actually be looking. */}
-          <p className="mt-5 border-t border-[--color-line] pt-4 text-[0.6875rem] leading-relaxed text-[--color-ink-faint]">
-            Each type is counted separately and judged against its own
-            requirement. The notch on each ring marks the percentage you need.
-          </p>
         </div>
       </div>
     </div>

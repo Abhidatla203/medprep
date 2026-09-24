@@ -8,60 +8,37 @@
 //   2. MarkList  — the ten-second daily habit    the only marking surface
 //   3. RingGrid  — "am I safe?"                  resting view, no numbers
 //
-// This file owns ONE piece of state and wires three components together.
+// ★ NO "OTHER SUBJECTS" DROPDOWN. Spec §4.4: every subject in THIS YEAR'S
+//   schedule appears on the main page. Burying half of them behind a disclosure
+//   triangle recreated the exact failure the ring grid exists to prevent — a
+//   subject sliding toward debarment while the screen looks calm.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  ★ NO "OTHER SUBJECTS" DROPDOWN. REMOVED DELIBERATELY.
-// ═════════════════════════════════════════════════════════════════════════════
-// Spec §4.4: every subject in THIS YEAR'S academic schedule appears on the main
-// page. Full stop. Burying half of them behind a disclosure triangle recreated
-// the exact failure the ring grid exists to prevent — a subject quietly sliding
-// toward debarment while the screen looks calm.
+// ⚠ selectedDate LIVES HERE. The strip and the list must always agree on which
+//   day is in focus. If either owned that state the other would need telling,
+//   and they would drift the first time a third entry point appeared (the list
+//   already has a calendar jump). One owner, two consumers, no sync code.
 //
-// Non-exam subjects are still TRACKED (never dropped, never deleted). They are
-// simply not on this screen; they live in settings and, later, the subject page.
-// "Tracked silently" means silent, not collapsed.
+// ⚠ THE MOUNT GATE. Every store read touches localStorage, which does not exist
+//   on the server — so the server renders an empty state and the client
+//   hydrates with real data, and React throws a mismatch. The first client
+//   render therefore matches the server EXACTLY (both produce the skeleton) and
+//   real data lands on pass two. The gate lives HERE so all three children stay
+//   free of hydration logic.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ WHY selectedDate LIVES HERE
-// ═════════════════════════════════════════════════════════════════════════════
-// The strip and the list must always agree on which day is in focus. If either
-// owned that state the other would need telling, and they would drift the first
-// time a third entry point appeared (the list already has a calendar jump).
-// One owner, two consumers, no synchronisation code.
+// ★ MIGRATIONS RUN BEFORE THE FIRST STORE READ. runMigrations() converts
+//   v2 → v3 → v4 and was called by nothing for several build steps, meaning
+//   anyone upgrading silently landed on defaults: 75% everywhere, extras
+//   reverting to the old global policy, custom targets gone.
+//     1. It runs BEFORE setMounted(true) — rendering against pre-migration data
+//        would show wrong figures for one frame, which reads as a glitch and
+//        undermines every number on screen.
+//     2. It runs in a top-level effect — migrations are idempotent, but a
+//        remounting component would re-read storage forever.
+//     3. StrictMode fires effects twice in dev; the ref guard makes that a no-op.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ THE MOUNT GATE — READ BEFORE REMOVING IT
-// ═════════════════════════════════════════════════════════════════════════════
-// Every store read touches localStorage. On the server it does not exist, so
-// store.ts correctly returns defaults and the server renders an empty state.
-// The client then hydrates with real data and React finds a different tree.
-//
-// Nothing is wrong with the store. The rule is: a component whose output
-// depends on browser-only state must not render that output on the server. So
-// the first client render matches the server EXACTLY (both produce the
-// skeleton) and real data lands on pass two. One frame, zero mismatch.
-//
-// ★ THE GATE LIVES HERE, IN THE PARENT, so all three children stay dumb.
-//
-// ═════════════════════════════════════════════════════════════════════════════
-//  ★ MIGRATIONS RUN HERE, BEFORE THE FIRST STORE READ
-// ═════════════════════════════════════════════════════════════════════════════
-// runMigrations() converts v2 → v3 → v4. It was written, correct, and called by
-// nothing for several build steps — meaning anyone upgrading silently landed on
-// defaults: 75% everywhere, extras reverting to the old global policy, custom
-// targets gone.
-//
-//   1. IT RUNS BEFORE setMounted(true). Rendering against pre-migration data
-//      would show wrong figures for one frame then correct them, which reads as
-//      a glitch and undermines every number on screen.
-//   2. IT RUNS IN A TOP-LEVEL EFFECT. Migrations are flag-guarded and
-//      idempotent, but a remounting component would re-read storage forever.
-//   3. STRICTMODE FIRES EFFECTS TWICE IN DEV. The ref guard makes that a no-op.
-//
-// ⚠ STILL OUTSTANDING: a student whose first stop is /settings reads
-//   pre-migration data. Proper home is a root-layout effect. Logged in
-//   MEMORY.md; layout.tsx has its own font issue and deserves one clean pass.
+//   ⚠ STILL OUTSTANDING: a student whose first stop is /settings reads
+//     pre-migration data. Proper home is a root-layout effect. Logged in
+//     MEMORY.md; layout.tsx has its own font issue and deserves one clean pass.
 // =============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -86,8 +63,8 @@ export default function AttendancePage() {
   // everyone — a fresh install has nothing to convert.
   const [migrationNotes, setMigrationNotes] = useState<string[]>([]);
 
-  // Bumped on every store write. Children are pure functions of
-  // (date, store), which React cannot see on its own.
+  // Bumped on every store write. Children are pure functions of (date, store),
+  // which React cannot see on its own.
   const [revision, setRevision] = useState(0);
 
   const migrationsRun = useRef(false);
@@ -130,18 +107,17 @@ export default function AttendancePage() {
  * Rendered by the server and by the first client pass.
  *
  * ⚠ MUST CONTAIN NO STORE READS. One localStorage value here and the mismatch
- *   simply moves rather than disappearing. Shapes roughly match the real
- *   layout so the transition does not jump.
+ *   simply moves rather than disappearing.
  */
 function Skeleton() {
   return (
     <main className="mx-auto max-w-3xl px-4 pb-28 pt-4">
-      <div className="h-6 w-40 animate-pulse rounded bg-[--color-surface-sunk]" />
-      <div className="mt-4 h-52 animate-pulse rounded-[--radius-card] bg-[--color-surface-sunk]" />
-      <div className="mt-5 h-7 w-56 animate-pulse rounded bg-[--color-surface-sunk]" />
+      <div className="h-6 w-40 animate-pulse rounded bg-surface-sunk" />
+      <div className="mt-4 h-52 animate-pulse rounded-card bg-surface-sunk" />
+      <div className="mt-5 h-7 w-56 animate-pulse rounded bg-surface-sunk" />
       <div className="mt-3 space-y-2">
-        <div className="h-24 animate-pulse rounded-[--radius-card] bg-[--color-surface-sunk]" />
-        <div className="h-24 animate-pulse rounded-[--radius-card] bg-[--color-surface-sunk]" />
+        <div className="h-24 animate-pulse rounded-card bg-surface-sunk" />
+        <div className="h-24 animate-pulse rounded-card bg-surface-sunk" />
       </div>
     </main>
   );
@@ -170,10 +146,10 @@ function AttendanceContent(props: {
 
   /**
    * ONE call. getYearResult is memoised on DataVersion, so after the first
-   * render this costs a map lookup. Splitting exam from non-exam is a filter
-   * over the result, never a second computation.
+   * render this costs a map lookup. Filtering exam subjects is a filter over
+   * the result, never a second computation.
    */
-  const { subjects, trackedElsewhere, unmarked } = useMemo(() => {
+  const { subjects, totalTracked, unmarked } = useMemo(() => {
     void revision; // recompute when the store changes
 
     const result = getYearResult(year);
@@ -181,42 +157,36 @@ function AttendanceContent(props: {
     return {
       // Everything in this year's schedule. No dropdown, no second tier.
       subjects: result.subjects.filter((s) => s.isExamSubject),
-      // Counted, not shown. A one-line footnote, not a collapsible section.
-      trackedElsewhere: result.subjects.filter((s) => !s.isExamSubject).length,
+      totalTracked: result.subjects.length,
       unmarked: getUnmarkedCount(year),
     };
   }, [year, revision]);
 
-  const nothingSetUp = subjects.length === 0 && trackedElsewhere === 0;
+  const nothingSetUp = totalTracked === 0;
 
   return (
     <main className="mx-auto max-w-3xl px-4 pb-28 pt-4">
       {/* ------------------------------------------- migration report ------
-          Shown once, only when there is something to report.
-
-          A silent conversion is how trust dies: a student who set 80% and finds
-          75% next week will not think "the migration was imperfect", they will
-          think the app is unreliable and go back to paper. */}
+          Shown once, only when there is something to report. A silent
+          conversion is how trust dies: a student who set 80% and finds 75% next
+          week will not think "the migration was imperfect", they will think the
+          app is unreliable and go back to paper. */}
       {migrationNotes.length > 0 && (
-        <div className="mb-4 rounded-[--radius-field] border border-[--color-brand-line] bg-[--color-brand-soft] px-4 py-3">
+        <div className="mb-4 rounded-field border border-brand-line bg-brand-soft px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-[--color-brand-ink]">
+              <p className="text-sm font-semibold text-brand-ink">
                 Your attendance data was updated
               </p>
               <ul className="mt-1.5 space-y-1">
                 {migrationNotes.map((note, i) => (
-                  <li key={i} className="text-sm text-[--color-brand-ink]">
+                  <li key={i} className="text-sm text-brand-ink">
                     - {note}
                   </li>
                 ))}
               </ul>
             </div>
-            <button
-              onClick={onDismissNotes}
-              aria-label="Dismiss"
-              className="modal-close"
-            >
+            <button onClick={onDismissNotes} aria-label="Dismiss" className="modal-close">
               ✕
             </button>
           </div>
@@ -227,7 +197,7 @@ function AttendanceContent(props: {
       <header className="mb-3 flex items-baseline justify-between gap-3">
         <div className="min-w-0">
           <h1 className="display truncate text-2xl">Attendance</h1>
-          <span className="text-xs text-[--color-ink-faint]">{year}</span>
+          <span className="text-xs text-ink-faint">{year}</span>
         </div>
         <Link href="/attendance/setup" className="btn btn-ghost min-h-9 text-sm">
           Setup
@@ -235,8 +205,8 @@ function AttendanceContent(props: {
       </header>
 
       {/* ------------------------------------------------- week strip ------
-          Read-only. Above the list on purpose: the first question on opening
-          the app is "what have I missed?", not "what am I marking?". */}
+          Above the list on purpose: the first question on opening the app is
+          "what have I missed?", not "what am I marking?". */}
       <WeekStrip
         anchorDate={selectedDate}
         selectedDate={selectedDate}
@@ -254,7 +224,7 @@ function AttendanceContent(props: {
       {/* ------------------------------------------------------ rings ------ */}
       {!nothingSetUp && (
         <section className="mt-9">
-          <div className="mb-1 flex items-baseline justify-between gap-2">
+          <div className="mb-3 flex items-baseline justify-between gap-2">
             <h2 className="eyebrow">Where you stand</h2>
 
             {/* A count of OUTSTANDING ACTIONS, never a score. It can be driven
@@ -267,28 +237,7 @@ function AttendanceContent(props: {
             )}
           </div>
 
-          <p className="mb-4 text-xs leading-relaxed text-[--color-ink-faint]">
-            Outer ring is theory, inner is practical or clinical. The notch on
-            each ring is the mark you need. Tap a subject for the numbers.
-          </p>
-
           <RingGrid subjects={subjects} revision={revision} />
-
-          {/* Non-exam subjects: acknowledged in one quiet line, not hidden
-              behind a control that implies there is something to open. */}
-          {trackedElsewhere > 0 && (
-            <p className="mt-6 text-center text-xs text-[--color-ink-faint]">
-              {trackedElsewhere} other{' '}
-              {trackedElsewhere === 1 ? 'subject is' : 'subjects are'} still being
-              tracked from earlier years.{' '}
-              <Link
-                href="/settings/attendance"
-                className="underline underline-offset-2"
-              >
-                View in settings
-              </Link>
-            </p>
-          )}
         </section>
       )}
 
@@ -298,7 +247,7 @@ function AttendanceContent(props: {
       {nothingSetUp && (
         <section className="card mt-6 p-6 text-center">
           <p className="display text-lg">Nothing tracked yet</p>
-          <p className="mt-1.5 text-sm text-[--color-ink-muted]">
+          <p className="mt-1.5 text-sm text-ink-muted">
             Add your timetable and we&apos;ll work out where you stand.
           </p>
           <Link href="/attendance/setup" className="btn btn-primary mt-4 inline-flex">
