@@ -21,22 +21,33 @@
 //   If ids were random, editing one class time in March would orphan every
 //   mark made since September — silently, with no error, and no way back.
 //
-//   Because ids are deterministic, a mark made on day one still finds its
-//   session after any number of edits. Change a class's SUBJECT or CATEGORY
-//   and the id legitimately changes — that is correct, because it is no
-//   longer the same class and its old marks should not follow it.
-//
 // Corollary: never put Date.now() or Math.random() anywhere in this file.
 // ═════════════════════════════════════════════════════════════════════════════
 //
+// REBUILD v4 — four changes from the previous version:
+//
+//   1. EXTRA SESSIONS CARRY countsTowardDenominator.
+//      Copied from the parent ExtraClass at generation time. Regular and
+//      posting sessions deliberately leave the field undefined — that absence
+//      is the safety mechanism that stops an extra-class policy change from
+//      ever reaching a scheduled class.
+//
+//   2. REGULAR SESSIONS RESPECT workingDays.
+//      A 6-day college was generating Sunday classes, which then sat unmarked
+//      forever and fired nightly notifications at a student who did nothing
+//      wrong.
+//
+//   3. THE TERM EXPANSION IS CACHED, keyed by DataVersion.
+//      Arithmetic was never the bottleneck; rebuilding ~2,000 sessions on
+//      every read was.
+//
+//   4. BLOCKOUTS NOW OUTRANK STALE ABSENCE MARKS. See SECTION 6.
+//
 // TRAPS ENFORCED HERE:
-//   TRAP 1 — a replaced slot takes the REPLACEMENT's category, never the
-//            original's. See buildPostingSessions().
-//   TRAP 3 — countsToward 'both' emits TWO sessions, one per category, sharing
-//            a bothPairKey. Never one session counted twice.
-//   TRAP 6 — college hours are validated in the data layer, not just hidden
-//            in the UI. See validateEntry().
-//   TRAP 7 — overlapping blockouts mark a date ONCE. Set-based, not additive.
+//   TRAP 1 — a replaced slot takes the REPLACEMENT's category.
+//   TRAP 3 — countsToward 'both' emits TWO sessions sharing a bothPairKey.
+//   TRAP 6 — college hours validated in the data layer, not just the UI.
+//   TRAP 7 — overlapping blockouts mark a date ONCE.
 // =============================================================================
 
 import type {
@@ -44,6 +55,7 @@ import type {
   Blockout,
   ClassCategory,
   ConflictReport,
+  DataVersion,
   DayIndex,
   ExtraClass,
   Id,
@@ -76,6 +88,7 @@ import { isValidCategoryForSubject, subjectName } from '@/lib/attendance/curricu
 
 import {
   getBlockouts,
+  getDataVersion,
   getExtraClasses,
   getMarks,
   getPostings,
@@ -110,6 +123,10 @@ export function postingSessionId(
 /**
  * Extra class. Category is part of the id so that a 'both' extra produces
  * two distinct, independently markable sessions. (TRAP 3)
+ *
+ * ⚠ countsTowardDenominator is NOT part of the id. Flipping that flag must
+ *   preserve the student's marks — it is an accounting change, not a
+ *   different class.
  */
 export function extraSessionId(
   extraId: Id,
@@ -131,6 +148,16 @@ export function bothPairKeyFor(extraId: Id, date: ISODate): Id {
 // A timetable entry is a WEEKLY RULE: "Surgery, Tuesdays, 10:00–13:00".
 // Expanding it means walking the term and emitting one session per matching
 // weekday.
+//
+// ★ v4 — workingDays now filters the expansion.
+//
+//   A student on a Mon–Sat timetable was still getting Sunday sessions if a
+//   stray entry existed on day 6. Those sessions could never be attended, sat
+//   unmarked forever, and drove the "N unmarked" nag up by one every week.
+//
+//   The entry is NOT deleted — it stays in the timetable, and re-enabling
+//   Sunday in settings brings its sessions straight back. Suppression here is
+//   a view over the data, never a mutation of it.
 // -----------------------------------------------------------------------------
 
 export interface GenerateWindow {
@@ -144,15 +171,24 @@ export function buildRegularSessions(
   year: AcademicYear,
   byDay: TimetableByDay,
   window: GenerateWindow,
+  workingDays?: readonly DayIndex[],
 ): Session[] {
   const out: Session[] = [];
   if (window.to < window.from) return out;
+
+  // undefined means "no filter" — tests and the setup preview need the raw
+  // expansion. An EMPTY array is different: it means no working days at all,
+  // and correctly yields nothing.
+  const allowed = workingDays ? new Set(workingDays) : null;
 
   for (const [dayKey, entries] of Object.entries(byDay)) {
     if (!entries || entries.length === 0) continue;
 
     const day = Number(dayKey);
     if (!Number.isInteger(day) || day < 0 || day > 6) continue;
+
+    // ★ Suppress non-working days. The entry survives; only its sessions stop.
+    if (allowed && !allowed.has(day as DayIndex)) continue;
 
     const dates = eachDateInRangeOnDays(window.from, window.to, [day as DayIndex]);
 
@@ -172,6 +208,8 @@ export function buildRegularSessions(
           weight: entry.weight,
           status: 'unmarked',
           timetableEntryId: entry.id,
+          // ⚠ countsTowardDenominator is deliberately ABSENT on regular
+          //   sessions. See SECTION 4.
         });
       }
     }
@@ -189,12 +227,15 @@ export function buildRegularSessions(
 // ⚠ TRAP 1 LIVES HERE.
 //   'replace' + a replacement → the session takes the REPLACEMENT's subject,
 //   category and weight. A clinical posting swapped for a theory class
-//   produces a THEORY session. Its attendance lands in the theory denominator.
-//   Getting this wrong is silent: the numbers still add up, they are just
-//   filed under the wrong heading.
+//   produces a THEORY session. Getting this wrong is silent: the numbers still
+//   add up, they are just filed under the wrong heading.
 //
 //   'replace' + null replacement → the posting simply did not run. No session.
 //   'alongside' → both run, both count. Exceptions only.
+//
+// NOTE: postings carry their OWN workingDays, chosen when the posting was
+// created. They are not filtered by the college-wide setting — a posting that
+// genuinely runs on a Sunday is a real thing in clinical medicine.
 // -----------------------------------------------------------------------------
 
 export function buildPostingSessions(
@@ -208,12 +249,7 @@ export function buildPostingSessions(
     // Skip postings entirely outside the window — cheap, and keeps generation
     // linear in what the user can actually see.
     if (
-      !dateRangesOverlap(
-        posting.startDate,
-        posting.endDate,
-        window.from,
-        window.to,
-      )
+      !dateRangesOverlap(posting.startDate, posting.endDate, window.from, window.to)
     ) {
       continue;
     }
@@ -224,9 +260,7 @@ export function buildPostingSessions(
     const dates = eachDateInRangeOnDays(from, to, posting.workingDays);
 
     // Index exceptions by date so the inner loop stays O(1) per day.
-    const exceptionByDate = new Map(
-      posting.exceptions.map((ex) => [ex.date, ex]),
-    );
+    const exceptionByDate = new Map(posting.exceptions.map((ex) => [ex.date, ex]));
 
     for (const date of dates) {
       const exception = exceptionByDate.get(date);
@@ -326,15 +360,24 @@ export function buildPostingSessions(
 //   requirements". Each denominator gains the weight exactly once. There is
 //   no combined denominator for the two to be double-counted in.
 //
-//   The alternative — one session with a flag — forces every downstream
-//   consumer to remember the special case. Two sessions means calculate.ts
-//   needs no special case at all. The complexity is paid once, here.
+// ★ v4 — EACH EXTRA SESSION NOW CARRIES countsTowardDenominator.
 //
-// NOTE ON POLICY: this file is deliberately blind to extraClassPolicy
-// ('add' vs 'ignore'). Generation always emits the sessions; calculate.ts
-// decides whether they touch the denominator. Mixing that decision in here
-// would make the marking page show or hide classes based on an accounting
-// setting, which is not what the student asked for.
+//   Copied from the parent ExtraClass at generation time. This is the fix that
+//   lets calculate.ts stop guessing, and it is the structural half of the
+//   separation the rebuild was called for:
+//
+//     • extra sessions      → HAVE the field
+//     • regular + posting   → the field is UNDEFINED, always
+//
+//   Because a regular session has no such field, recalculating extras is
+//   incapable of reaching one. Not "unlikely to" — incapable. The old global
+//   settings.extraClassPolicy could sweep through every class in the app;
+//   this cannot, and no future maintainer has to remember why.
+//
+// NOTE ON VISIBILITY: generation stays blind to whether the flag is true or
+// false. The session is always emitted, so the marking page shows the class
+// either way. Only the arithmetic in calculate.ts differs. An accounting
+// setting must never make a class disappear from a student's day.
 // -----------------------------------------------------------------------------
 
 /** Which dates does this extra class actually fall on? */
@@ -375,6 +418,11 @@ export function buildExtraSessions(
     const categories = categoriesForExtra(extra);
     const isPaired = extra.countsToward === 'both';
 
+    // ★ Read once per extra, stamped onto every session it produces.
+    //   Defaults to true only if storage somehow yielded a non-boolean —
+    //   sanitiseExtra in store.ts should make that unreachable.
+    const countsTowardDenominator = extra.countsTowardDenominator !== false;
+
     for (const date of dates) {
       const pairKey = isPaired ? bothPairKeyFor(extra.id, date) : undefined;
 
@@ -392,6 +440,8 @@ export function buildExtraSessions(
           end: extra.end,
           weight: extra.weight,
           status: 'unmarked',
+          // ★ v4 — the whole point of this section.
+          countsTowardDenominator,
           extraClassId: extra.id,
           bothPairKey: pairKey,
         });
@@ -415,11 +465,6 @@ export function buildExtraSessions(
 // percentage.
 // -----------------------------------------------------------------------------
 
-/**
- * Blocked dates, split by scope.
- *   `all`       → dates where every subject is blocked
- *   `bySubject` → subjectId → dates blocked for that subject only
- */
 interface BlockedIndex {
   all: Set<ISODate>;
   bySubject: Map<SubjectId, Set<ISODate>>;
@@ -441,8 +486,8 @@ export function buildBlockedIndex(
     const dates = eachDateInRange(from, to);
 
     // Null subjectIds means "everything". An empty array means the user
-    // created a subject-scoped blockout and picked no subjects — which
-    // blocks nothing, and that is the honest reading.
+    // created a subject-scoped blockout and picked no subjects — which blocks
+    // nothing, and that is the honest reading.
     if (b.subjectIds === null) {
       dates.forEach((d) => index.all.add(d));
       continue;
@@ -462,14 +507,8 @@ function isBlocked(index: BlockedIndex, session: Session): boolean {
   return index.bySubject.get(session.subjectId)?.has(session.date) === true;
 }
 
-/**
- * Forces blocked sessions to 'not-conducted'.
- * Returns a new array; does not mutate the input.
- */
-export function applyBlockouts(
-  sessions: Session[],
-  index: BlockedIndex,
-): Session[] {
+/** Returns a new array; does not mutate the input. */
+export function applyBlockouts(sessions: Session[], index: BlockedIndex): Session[] {
   return sessions.map((s) =>
     isBlocked(index, s) ? { ...s, status: 'not-conducted' as const } : s,
   );
@@ -479,21 +518,37 @@ export function applyBlockouts(
 // -----------------------------------------------------------------------------
 // SECTION 6 — Marks
 //
-// Applied LAST, and deliberately so.
+// ★ v4 — BLOCKOUTS NOW OUTRANK STALE ABSENCE MARKS.
 //
-// Order matters: blockouts run first, then marks. A user who marked a class
-// 'present' before declaring exam week should see that week drop out of the
-// denominator... but a blocked session that was explicitly marked keeps its
-// mark, because an explicit statement from the user outranks a range rule.
+//   The old order let any mark overwrite a blockout. That produced this:
 //
-// The one exception: 'not-conducted' from a blockout is not overridden by an
-// 'unmarked' absence of a mark, which is the common case.
+//     March — student marks Tuesday's Pathology 'absent'.
+//     April — college announces that Tuesday was a public holiday.
+//     Student adds a holiday blockout covering it.
+//     Result: the session goes 'not-conducted', then the stale 'absent' mark
+//             immediately overwrites it. The percentage never recovers, and
+//             nothing on screen explains why.
+//
+//   A class that did not happen cannot be an absence. So:
+//
+//     • blocked + marked 'absent' or 'unmarked' → stays 'not-conducted'
+//     • blocked + marked 'present'              → the mark WINS
+//
+//   That asymmetry is deliberate, not an oversight. "I was absent" is a guess
+//   about a class the student now knows never ran. "I was present" is a
+//   first-hand report of actually being there — which happens when a
+//   department runs a make-up session during a blocked week. First-hand
+//   knowledge beats a range rule; a guess does not.
 // -----------------------------------------------------------------------------
 
 export function applyMarks(sessions: Session[], marks: SessionMarks): Session[] {
   return sessions.map((s) => {
     const mark = marks[s.id];
     if (!mark || mark === 'unmarked') return s;
+
+    // ★ Only a first-hand 'present' may override a blockout.
+    if (s.status === 'not-conducted' && mark !== 'present') return s;
+
     return { ...s, status: mark };
   });
 }
@@ -514,6 +569,12 @@ export interface GenerateOptions {
   marks?: SessionMarks;
   /** False skips extra classes entirely. Defaults to the settings toggle. */
   includeExtras?: boolean;
+  /**
+   * ★ v4 — which weekdays generate regular sessions.
+   * Defaults to settings.college.workingDays.
+   * Pass null to disable filtering (setup previews, tests).
+   */
+  workingDays?: readonly DayIndex[] | null;
 }
 
 /**
@@ -532,8 +593,14 @@ export function generateSessions(options: GenerateOptions): Session[] {
   const includeExtras = options.includeExtras ?? settings.extraClassesEnabled;
   const extras = includeExtras ? (options.extras ?? getExtraClasses(year)) : [];
 
+  // undefined → use the setting. null → explicitly no filter.
+  const workingDays =
+    options.workingDays === null
+      ? undefined
+      : (options.workingDays ?? settings.college.workingDays);
+
   let sessions: Session[] = [
-    ...buildRegularSessions(year, byDay, window),
+    ...buildRegularSessions(year, byDay, window, workingDays),
     ...buildPostingSessions(year, postings, window),
     ...buildExtraSessions(year, extras, window),
   ];
@@ -546,17 +613,94 @@ export function generateSessions(options: GenerateOptions): Session[] {
   );
 }
 
-/** Convenience: the whole term for a year, straight from storage. */
-export function generateForYear(year: AcademicYear): Session[] {
-  const { term } = getSettings();
-  return generateSessions({
-    year,
-    window: { from: term.startDate, to: term.endDate },
-  });
+
+// -----------------------------------------------------------------------------
+// SECTION 8 — Generation cache   ★ NEW IN v4
+//
+// Expanding a full term is the expensive step — roughly 1,500–2,500 sessions,
+// each an object allocation. The arithmetic in calculate.ts is free by
+// comparison; this was always the real cost.
+//
+// Keyed by DataVersion, which store.ts bumps on every mutating write. Same
+// version → serve the cached array. Anything changes → rebuild.
+//
+// ★ IN MEMORY ONLY, and the array is treated as FROZEN by convention: callers
+//   must not mutate what they receive. Nothing derived is ever persisted, so
+//   a stale session list cannot survive a reload.
+// -----------------------------------------------------------------------------
+
+interface GenCacheEntry {
+  version: DataVersion;
+  sessions: Session[];
 }
 
-/** Sessions on one date. Used by "Today's classes" on the marking page. */
+const generationCache = new Map<string, GenCacheEntry>();
+
+/** Cache key. Window is included so a week view cannot serve a term view. */
+function cacheKey(year: AcademicYear, from: ISODate, to: ISODate): string {
+  return `${year}|${from}|${to}`;
+}
+
+export function invalidateGenerationCache(): void {
+  generationCache.clear();
+}
+
+/** Diagnostics for the dev panel. Never shown to a student. */
+export function generationCacheStats(): { entries: number; keys: string[] } {
+  return { entries: generationCache.size, keys: [...generationCache.keys()] };
+}
+
+/** Shared read-through path for every cached helper below. */
+function cachedGenerate(
+  year: AcademicYear,
+  window: GenerateWindow,
+): Session[] {
+  const version = getDataVersion();
+  const key = cacheKey(year, window.from, window.to);
+
+  const hit = generationCache.get(key);
+  if (hit && hit.version === version) return hit.sessions;
+
+  const sessions = generateSessions({ year, window });
+
+  // A version bump invalidates EVERYTHING, so drop stale keys rather than
+  // letting the map grow one entry per week the student ever scrolled to.
+  if (hit || generationCache.size > 24) {
+    for (const [k, v] of generationCache) {
+      if (v.version !== version) generationCache.delete(k);
+    }
+  }
+
+  generationCache.set(key, { version, sessions });
+  return sessions;
+}
+
+
+// -----------------------------------------------------------------------------
+// SECTION 9 — Convenience entry points
+// -----------------------------------------------------------------------------
+
+/** The whole term for a year, straight from storage. Cached. */
+export function generateForYear(year: AcademicYear): Session[] {
+  const { term } = getSettings();
+  return cachedGenerate(year, { from: term.startDate, to: term.endDate });
+}
+
+/**
+ * Sessions on one date. Used by "Today's classes" on the marking page.
+ *
+ * Filters the cached term rather than regenerating, so opening the day
+ * dropdown and stepping through a week costs nothing.
+ */
 export function generateForDate(year: AcademicYear, date: ISODate): Session[] {
+  const { term } = getSettings();
+
+  // Inside the term: reuse the cached expansion.
+  if (isDateInRange(date, term.startDate, term.endDate)) {
+    return generateForYear(year).filter((s) => s.date === date);
+  }
+
+  // Outside it — a quick-added class before term start, say. Generate directly.
   return generateSessions({ year, window: { from: date, to: date } });
 }
 
@@ -566,24 +710,38 @@ export function generateForToday(): Session[] {
   return generateForDate(currentYear, todayISO());
 }
 
-/** A Monday-to-Sunday week containing the given date. */
+/**
+ * One week. Powers the week strip.
+ *
+ * Same trick as generateForDate: slice the cached term when the week sits
+ * inside it, so swiping through history is a filter, not a rebuild.
+ */
 export function generateForWeek(
   year: AcademicYear,
   weekStart: ISODate,
   weekEnd: ISODate,
 ): Session[] {
-  return generateSessions({ year, window: { from: weekStart, to: weekEnd } });
+  const { term } = getSettings();
+
+  if (
+    isDateInRange(weekStart, term.startDate, term.endDate) &&
+    isDateInRange(weekEnd, term.startDate, term.endDate)
+  ) {
+    return generateForYear(year).filter(
+      (s) => s.date >= weekStart && s.date <= weekEnd,
+    );
+  }
+
+  return cachedGenerate(year, { from: weekStart, to: weekEnd });
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 8 — Conflict validation
+// SECTION 10 — Conflict validation
 //
 // ⚠ TRAP 6 LIVES HERE.
 //   College hours are checked in the DATA layer. Hiding out-of-hours slots in
-//   the picker is a courtesy; this is the actual rule. A slot outside college
-//   hours is legal only when the entry is explicitly flagged isAfterHours AND
-//   the setting permits it.
+//   the picker is a courtesy; this is the actual rule.
 //
 // ZERO OVERLAP TOLERANCE. Back-to-back is fine (10:00 end, 10:00 start).
 // One shared minute is rejected. A student cannot be in two rooms at once.
@@ -634,7 +792,6 @@ export function validateEntry(
     suggestedStart: null,
   };
 
-  // ---- Basic sanity ----
   if (proposed.start >= proposed.end) {
     return {
       ...clean,
@@ -643,12 +800,23 @@ export function validateEntry(
     };
   }
 
-  // ---- Category legality for this subject ----
   if (!isValidCategoryForSubject(proposed.subjectId, proposed.category)) {
     return {
       ...clean,
       hasConflict: true,
       message: `${subjectName(proposed.subjectId)} does not have ${proposed.category} classes.`,
+    };
+  }
+
+  // ★ v4 — a class on a non-working day warns rather than blocks. The student
+  //   may be about to enable that day in settings, and refusing outright would
+  //   be a dead end with no explanation.
+  if (!settings.college.workingDays.includes(day)) {
+    return {
+      ...clean,
+      hasConflict: true,
+      message:
+        'That day is not one of your working days. Add it in settings, or the class will be saved but not counted.',
     };
   }
 
@@ -708,10 +876,9 @@ export function validateEntry(
 /**
  * Where should the add-class form open?
  *
- * This is the behaviour requested by name: finish a class at 10:00 and the
- * next form opens pre-filled at 10:00, with 09:00 gone from the list. Returns
- * null when the day is full — the caller should then disable the add button
- * rather than present an empty picker.
+ * Finish a class at 10:00 and the next form opens pre-filled at 10:00, with
+ * 09:00 gone from the list. Returns null when the day is full — the caller
+ * should disable the add button rather than present an empty picker.
  */
 export function suggestedStartFor(
   year: AcademicYear,
@@ -730,7 +897,7 @@ export function suggestedStartFor(
 
 
 // -----------------------------------------------------------------------------
-// SECTION 9 — Posting conflict detection
+// SECTION 11 — Posting conflict detection
 //
 // Postings collide by DATE, not by weekday, so they need their own check.
 // Unlike timetable overlaps this does NOT hard-block: the spec calls for a
@@ -740,9 +907,7 @@ export function suggestedStartFor(
 
 export interface PostingConflict {
   date: ISODate;
-  /** Regular timetable entries clashing on that date. */
   withEntries: TimetableEntry[];
-  /** Other postings clashing on that date. */
   withPostings: Posting[];
 }
 
@@ -787,7 +952,7 @@ export function findPostingConflicts(
 
 
 // -----------------------------------------------------------------------------
-// SECTION 10 — Query helpers
+// SECTION 12 — Query helpers
 //
 // ⚠ TRAP 9 — subjectsInTimetable() is the function the summary page must use
 //   to decide what to display. The curriculum lists what is POSSIBLE; this
@@ -845,3 +1010,13 @@ export function dayLoadMinutes(year: AcademicYear, day: DayIndex): number {
     return sum + Math.max(0, eh * 60 + em - (sh * 60 + sm));
   }, 0);
 }
+
+
+// =============================================================================
+// NEXT — the UI layer. Needs app/globals.css first.
+//   • WeekStrip.tsx  — 5 tile states, break inference, working-day columns
+//   • MarkList.tsx   — day header, dropdown, calendar jump, quick add,
+//                      mark-all-cancelled
+//   • RingGrid.tsx   — concentric rings, auto-layout, tap to expand
+//   • page.tsx       — assembles the three
+// =============================================================================
