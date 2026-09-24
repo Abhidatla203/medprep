@@ -3,11 +3,11 @@
 // =============================================================================
 // app/attendance/setup/DataPanel.tsx
 // -----------------------------------------------------------------------------
-// Three jobs the app could not previously do:
+// Three jobs:
 //
 //   1. PICK UP WHERE YOU LEFT OFF — opening balances for a mid-year start
 //   2. EXPORT — a JSON backup of everything
-//   3. IMPORT — the same file back, additively
+//   3. IMPORT — the same file back
 //
 // WHY OPENING BALANCE RATHER THAN FAKE SESSIONS
 //   The obvious implementation generates 50 past sessions and marks 34 present.
@@ -16,7 +16,22 @@
 //   is two integers added at calculation time. It cannot drift.
 //
 // ⚠ TRAP 2 — an excluded subject's opening balance is ignored along with its
-//   sessions. That rule lives in categoryResult() and is not duplicated here.
+//   sessions. That rule lives in calculate.ts and is not duplicated here.
+//
+// REBUILD v4 — three changes from the previous version:
+//
+//   1. TRANSFER NOW USES THE STORE'S OWN BACKUP FUNCTIONS.
+//      The old bundle re-created every timetable row through addTimetableEntry(),
+//      which mints FRESH ids. Marks are keyed by session id, which derives from
+//      the parent entry id — so a student could import their own backup and
+//      watch a year of attendance detach itself. exportBackup/importBackup write
+//      the stores verbatim, ids intact, and marks survive.
+//
+//   2. NO DEPENDENCY ON calculate.ts. Display rounding is local. This file must
+//      not care how the calculator works, and must not break while it is rewritten.
+//
+//   3. THRESHOLDS ARE PER SUBJECT PER TYPE. The balance preview shows the
+//      threshold that actually applies, not a single global target.
 // =============================================================================
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -24,8 +39,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AcademicYear,
   ClassCategory,
-  OpeningBalance,
-  SessionStatus,
   SubjectId,
 } from '../types';
 
@@ -37,20 +50,17 @@ import {
 } from '@/lib/attendance/curriculum';
 
 import {
-  addPosting,
-  addTimetableEntry,
+  exportBackupJSON,
   getEntOphthaInFinalYear,
   getMarks,
   getOpeningBalance,
   getPostings,
-  getSettings,
+  getThreshold,
   getTimetableStore,
-  setMark,
+  hasCustomThreshold,
+  importBackup,
   setOpeningBalance,
-  updateSettings,
 } from '../store';
-
-import { percentOf } from '../calculate';
 
 
 const CATEGORY_LABEL: Record<ClassCategory, string> = {
@@ -59,8 +69,22 @@ const CATEGORY_LABEL: Record<ClassCategory, string> = {
   clinical: 'Clinical',
 };
 
-/** Bumped when the bundle shape changes, so imports can refuse politely. */
-const BUNDLE_VERSION = 3;
+/**
+ * DISPLAY ONLY. One decimal, for eyeballs.
+ *
+ * ⚠ Never feed this into a comparison. v3 rounded first, so 74.96% became 75.0,
+ *   scored "safe", and told a student below the line they needed zero classes.
+ *   Decisions use the exact ratio; this exists purely to be read.
+ */
+function displayPercent(attended: number, conducted: number): string {
+  if (conducted <= 0) return '—';
+  return (Math.round((attended / conducted) * 1000) / 10).toFixed(1);
+}
+
+interface Balance {
+  conducted: number;
+  attended: number;
+}
 
 
 export default function DataPanel(props: {
@@ -76,7 +100,7 @@ export default function DataPanel(props: {
   }, [sheet, onSheetChange]);
 
   const balanceCount = useMemo(() => {
-    void revision;
+    void revision; // recount whenever the store changes
     let n = 0;
     for (const s of selectableSubjectsFor(year, undefined, getEntOphthaInFinalYear())) {
       for (const c of categoriesForSubject(s.id)) {
@@ -168,9 +192,27 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
     [subjectId],
   );
 
-  const existing: OpeningBalance | null = useMemo(
-    () => (subjectId ? getOpeningBalance(year, subjectId, category) ?? null : null),
+  // Keep the selected category legal when the subject changes. A clinical
+  // subject has no practical, and a stale selection would silently write a
+  // balance into a category that will never be displayed.
+  useEffect(() => {
+    if (cats.length > 0 && !cats.includes(category)) setCategory(cats[0]);
+  }, [cats, category]);
+
+  const existing: Balance | null = useMemo(
+    () => (subjectId ? getOpeningBalance(year, subjectId, category) : null),
     [year, subjectId, category, saved],
+  );
+
+  /** The threshold that actually applies here — resolved override or default. */
+  const threshold = useMemo(
+    () => (subjectId ? getThreshold(year, subjectId, category) : 75),
+    [year, subjectId, category],
+  );
+
+  const isCustom = useMemo(
+    () => (subjectId ? hasCustomThreshold(year, subjectId, category) : false),
+    [year, subjectId, category],
   );
 
   /**
@@ -183,13 +225,18 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
     if (mode === 'counts') {
       const att = Number(attended);
       if (!Number.isFinite(total) || !Number.isFinite(att) || total <= 0) return null;
-      return { conducted: Math.floor(total), attended: Math.floor(att) };
+      return {
+        conducted: Math.floor(total),
+        attended: Math.floor(att),
+        isEstimate: false,
+      };
     }
     const pct = Number(percent);
     if (!Number.isFinite(total) || !Number.isFinite(pct) || total <= 0) return null;
     return {
       conducted: Math.floor(total),
       attended: Math.round((Math.min(100, Math.max(0, pct)) / 100) * Math.floor(total)),
+      isEstimate: true,
     };
   }, [mode, conducted, attended, percent]);
 
@@ -200,18 +247,21 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
     if (!subjectId) return setError('Choose a subject.');
     if (!derived) return setError('Enter how many classes were conducted.');
     if (derived.conducted <= 0) return setError('Classes conducted must be more than zero.');
+    if (derived.attended < 0) return setError('Attended cannot be negative.');
     if (derived.attended > derived.conducted) {
       return setError('Attended cannot be more than conducted.');
     }
-    if (derived.attended < 0) return setError('Attended cannot be negative.');
 
+    // ⚠ TRAP 10 — this REPLACES the figures for this exact
+    //   year + subject + category. It never adds to them.
     setOpeningBalance(year, subjectId, category, {
       conducted: derived.conducted,
       attended: derived.attended,
+      isEstimate: derived.isEstimate,
     });
 
     setSaved(
-      `${subjectName(subjectId)} ${CATEGORY_LABEL[category]} — ${derived.attended}/${derived.conducted} (${percentOf(derived.attended, derived.conducted)}%)`,
+      `${subjectName(subjectId)} ${CATEGORY_LABEL[category]} — ${derived.attended}/${derived.conducted} (${displayPercent(derived.attended, derived.conducted)}%)`,
     );
     setConducted('');
     setAttended('');
@@ -279,10 +329,18 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
 
       <L label="Enter as">
         <div className="flex gap-2">
-          <button onClick={() => setMode('counts')} className={`seg ${mode === 'counts' ? 'seg-on' : ''}`}>
+          <button
+            onClick={() => setMode('counts')}
+            aria-pressed={mode === 'counts'}
+            className={`seg ${mode === 'counts' ? 'seg-on' : ''}`}
+          >
             Class counts
           </button>
-          <button onClick={() => setMode('percent')} className={`seg ${mode === 'percent' ? 'seg-on' : ''}`}>
+          <button
+            onClick={() => setMode('percent')}
+            aria-pressed={mode === 'percent'}
+            className={`seg ${mode === 'percent' ? 'seg-on' : ''}`}
+          >
             Percentage
           </button>
         </div>
@@ -316,13 +374,19 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
       </div>
 
       {derived && derived.conducted > 0 && (
-        <p className="rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3 text-sm text-[--color-ink-soft]">
-          Recording{' '}
-          <span className="tnum font-semibold text-[--color-ink]">
-            {derived.attended} of {derived.conducted}
-          </span>{' '}
-          — {percentOf(derived.attended, derived.conducted)}%
-        </p>
+        <div className="rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3 text-sm text-[--color-ink-soft]">
+          <p>
+            Recording{' '}
+            <span className="tnum font-semibold text-[--color-ink]">
+              {derived.attended} of {derived.conducted}
+            </span>{' '}
+            — {displayPercent(derived.attended, derived.conducted)}%
+          </p>
+          <p className="mt-1 text-[--color-ink-muted]">
+            {CATEGORY_LABEL[category]} needs {threshold}%
+            {isCustom ? ' (your setting)' : ' (default)'}.
+          </p>
+        </div>
       )}
 
       {saved && (
@@ -343,69 +407,25 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
 // =============================================================================
 // Export / import
 //
-// ⚠ MARKS AND IDENTITY
-//   Marks are keyed by deterministic session id, which derives from the parent
-//   timetable entry's id plus the date. Import creates entries through
-//   addTimetableEntry(), which mints FRESH ids — so restored marks reattach
-//   only when the entries they belong to still exist under the same ids.
+// ⚠ THE BUG THIS VERSION FIXES
+//   The old importer rebuilt every timetable row through addTimetableEntry(),
+//   which mints a fresh id each time. Session ids derive from the parent entry
+//   id, and marks are keyed by session id — so importing your own backup
+//   detached every mark you had ever made. It looked like data loss because it
+//   was data loss.
 //
-//   In practice: restoring into the same browser works; restoring onto a clean
-//   device recovers the timetable, postings, settings and carried-forward
-//   figures, but day-by-day marks may not reattach. Rather than silently drop
-//   them, they are exported and the sheet says so plainly.
+//   exportBackup/importBackup in store.ts write the stores verbatim. Ids are
+//   preserved, so marks reattach on any device.
+//
+// ⚠ IMPORT REPLACES, IT DOES NOT MERGE. There is no undo, so the student
+//   confirms first and is offered a safety export on the way.
 // =============================================================================
-
-interface Bundle {
-  app: 'medprep';
-  kind: 'attendance';
-  version: number;
-  exportedAt: string;
-  settings: unknown;
-  timetable: Record<string, unknown>;
-  postings: Record<string, unknown>;
-  marks: Record<string, SessionStatus>;
-  openingBalances: Array<{
-    year: AcademicYear;
-    subjectId: SubjectId;
-    category: ClassCategory;
-    conducted: number;
-    attended: number;
-  }>;
-}
-
-function buildBundle(): Bundle {
-  const balances: Bundle['openingBalances'] = [];
-  const postings: Record<string, unknown> = {};
-
-  for (const y of ACADEMIC_YEARS) {
-    postings[y] = getPostings(y);
-    for (const s of selectableSubjectsFor(y, undefined, getEntOphthaInFinalYear())) {
-      for (const c of categoriesForSubject(s.id)) {
-        const b = getOpeningBalance(y, s.id, c);
-        if (b && b.conducted > 0) {
-          balances.push({ year: y, subjectId: s.id, category: c, ...b });
-        }
-      }
-    }
-  }
-
-  return {
-    app: 'medprep',
-    kind: 'attendance',
-    version: BUNDLE_VERSION,
-    exportedAt: new Date().toISOString(),
-    settings: getSettings(),
-    timetable: getTimetableStore() as Record<string, unknown>,
-    postings,
-    marks: getMarks() as Record<string, SessionStatus>,
-    openingBalances: balances,
-  };
-}
 
 function TransferSheet(props: { onClose: () => void }) {
   const { onClose } = props;
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [pending, setPending] = useState<string | null>(null);
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -429,9 +449,7 @@ function TransferSheet(props: { onClose: () => void }) {
   const handleExport = () => {
     setError(null);
     try {
-      const blob = new Blob([JSON.stringify(buildBundle(), null, 2)], {
-        type: 'application/json',
-      });
+      const blob = new Blob([exportBackupJSON()], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -447,107 +465,58 @@ function TransferSheet(props: { onClose: () => void }) {
   const handleFile = async (file: File) => {
     setError(null);
     setReport(null);
-
-    let data: Bundle;
     try {
-      data = JSON.parse(await file.text());
+      setPending(await file.text());
     } catch {
-      return setError('That file is not readable JSON.');
+      setError('Could not read that file.');
     }
+  };
 
-    if (data?.app !== 'medprep' || data?.kind !== 'attendance') {
-      return setError('That is not a medprep attendance export.');
+  const confirmImport = () => {
+    if (pending === null) return;
+    const result = importBackup(pending);
+    setPending(null);
+
+    if (!result.ok) {
+      setError(result.error ?? 'That file could not be imported.');
+      return;
     }
-    if (typeof data.version !== 'number' || data.version > BUNDLE_VERSION) {
-      return setError('That file was made by a newer version of the app.');
-    }
-
-    let entries = 0;
-    let posts = 0;
-    let balances = 0;
-    let marks = 0;
-
-    // Settings first — target percent and college hours shape everything else.
-    if (data.settings && typeof data.settings === 'object') {
-      updateSettings(data.settings as Parameters<typeof updateSettings>[0]);
-    }
-
-    // Timetable goes through the public API so every imported row faces the
-    // same overlap validation a hand-typed one would. Slower than a bulk write,
-    // and worth it: an import can never introduce a conflict the UI refuses.
-    for (const [y, byDay] of Object.entries(data.timetable ?? {})) {
-      for (const [day, list] of Object.entries((byDay ?? {}) as Record<string, unknown[]>)) {
-        for (const raw of list ?? []) {
-          const e = raw as Record<string, unknown>;
-          try {
-            addTimetableEntry(y as AcademicYear, Number(day) as 0, {
-              subjectId: String(e.subjectId),
-              subjectName: String(e.subjectName ?? subjectName(String(e.subjectId))),
-              category: e.category as ClassCategory,
-              start: String(e.start),
-              end: String(e.end),
-              weight: Number(e.weight) || 1,
-              isAfterHours: e.isAfterHours === true,
-            });
-            entries += 1;
-          } catch {
-            /* One bad row must not abort the whole import. */
-          }
-        }
-      }
-    }
-
-    for (const [y, list] of Object.entries(data.postings ?? {})) {
-      for (const raw of (list ?? []) as unknown[]) {
-        const p = raw as Record<string, unknown>;
-        try {
-          addPosting(y as AcademicYear, {
-            subjectId: String(p.subjectId),
-            subjectName: String(p.subjectName ?? subjectName(String(p.subjectId))),
-            startDate: String(p.startDate),
-            endDate: String(p.endDate),
-            start: String(p.start),
-            end: String(p.end),
-            workingDays: (p.workingDays as number[]) ?? [0, 1, 2, 3, 4, 5],
-            weight: Number(p.weight) || 1,
-          } as Parameters<typeof addPosting>[1]);
-          posts += 1;
-        } catch {
-          /* skip */
-        }
-      }
-    }
-
-    for (const b of data.openingBalances ?? []) {
-      try {
-        setOpeningBalance(b.year, b.subjectId, b.category, {
-          conducted: b.conducted,
-          attended: b.attended,
-        });
-        balances += 1;
-      } catch {
-        /* skip */
-      }
-    }
-
-    // Marks restored verbatim by session id. Harmless when an id no longer
-    // resolves — an orphaned mark is simply never read.
-    for (const [id, status] of Object.entries(data.marks ?? {})) {
-      try {
-        setMark(id, status);
-        marks += 1;
-      } catch {
-        /* skip */
-      }
-    }
-
     setReport(
-      `Imported ${entries} ${entries === 1 ? 'class' : 'classes'}, ` +
-        `${posts} ${posts === 1 ? 'posting' : 'postings'}, ` +
-        `${balances} carried-forward ${balances === 1 ? 'figure' : 'figures'}, ` +
-        `${marks} ${marks === 1 ? 'mark' : 'marks'}.`,
+      ['Imported. Your timetable, postings, marks and carried-forward figures are restored.',
+        ...result.notes].join(' '),
     );
   };
+
+  // ---- Confirmation step: destructive, so it gets its own screen ----
+  if (pending !== null) {
+    return (
+      <Sheet
+        title="Replace everything?"
+        onClose={() => setPending(null)}
+        onSave={confirmImport}
+        saveLabel="Replace my data"
+      >
+        <p className="rounded-[--radius-field] border border-[--color-critical-line] bg-[--color-critical-soft] px-4 py-3 text-sm text-[--color-critical]">
+          Importing <span className="font-semibold">replaces</span> your current
+          attendance data. It is not merged, and it cannot be undone.
+        </p>
+
+        <div className="rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3 text-sm text-[--color-ink-soft]">
+          About to be replaced:{' '}
+          <span className="tnum font-semibold text-[--color-ink]">{stats.entries}</span>{' '}
+          weekly {stats.entries === 1 ? 'class' : 'classes'},{' '}
+          <span className="tnum font-semibold text-[--color-ink]">{stats.posts}</span>{' '}
+          {stats.posts === 1 ? 'posting' : 'postings'},{' '}
+          <span className="tnum font-semibold text-[--color-ink]">{stats.marks}</span>{' '}
+          {stats.marks === 1 ? 'mark' : 'marks'}.
+        </div>
+
+        <button onClick={handleExport} className="btn btn-ghost w-full">
+          ↓ Export what I have first
+        </button>
+      </Sheet>
+    );
+  }
 
   return (
     <Sheet title="Export & import" onClose={onClose}>
@@ -588,12 +557,10 @@ function TransferSheet(props: { onClose: () => void }) {
 
         <p className="mt-3 text-sm text-[--color-ink-muted]">
           <span className="font-medium text-[--color-ink-soft]">
-            Imports are added to what you already have.
+            Importing replaces what you have.
           </span>{' '}
-          Anything clashing with an existing class is skipped rather than
-          overwriting it. Restoring onto a fresh device recovers your timetable,
-          postings and carried-forward figures; individual day marks may not
-          reattach, since they are tied to the classes they belong to.
+          You will be asked to confirm first. Class ids are preserved, so your
+          day-by-day marks reattach correctly — including on a new device.
         </p>
       </div>
 

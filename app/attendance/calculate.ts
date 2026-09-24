@@ -1,679 +1,765 @@
 // =============================================================================
 // app/attendance/calculate.ts
 // -----------------------------------------------------------------------------
-// Sessions in, percentages out. The last pure-logic file in the stack.
+// The calculator. Sessions in, numbers out.
 //
-//     Session[]  ─→  exclusions  ─→  opening balance  ─→  policy  ─→  Result
-//
-// Nothing here writes to storage. Nothing here touches React.
+// REBUILD v4 — see ATTENDANCE_REBUILD_SPEC.txt
 //
 // ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ TRAP 5 — NOTHING IS CACHED. EVER.
-// ═════════════════════════════════════════════════════════════════════════════
-// There is no memoisation in this file. No module-level result store, no
-// WeakMap keyed on inputs, no "only recompute if dirty" flag.
-//
-// Why: the spec requires that toggling an exclusion, editing an extra class's
-// countsToward, or importing an opening balance updates every percentage
-// INSTANTLY. A cache is a promise to return a stale answer under conditions
-// you did not fully enumerate. On a dataset this size — a few thousand
-// sessions at most — full recomputation costs under a millisecond.
-//
-// If profiling ever says otherwise, memoise in the React layer where the
-// invalidation key is explicit. Never here.
+//  THE FIVE RULES THIS FILE EXISTS TO ENFORCE
 // ═════════════════════════════════════════════════════════════════════════════
 //
-// OTHER TRAPS ENFORCED HERE:
-//   TRAP 2 — an excluded subject's OPENING BALANCE is ignored too. Skipping
-//            the sessions but keeping the carried-forward figures is the
-//            subtlest bug in the whole system, because the number still looks
-//            plausible. See categoryResult().
-//   TRAP 8 — the exam-subject lock is REPORTED here (isExamSubject on the
-//            result) so the UI can grey the toggle. The rule itself lives in
-//            curriculum.ts and is not reimplemented.
-//   TRAP 9 — only subjects that actually appear in the student's own data are
-//            returned. The curriculum lists what is POSSIBLE; this returns
-//            what is REAL. No "ENT — 0%" for someone who never studied ENT.
+//  1. EXACT RATIO FOR EVERY DECISION.
+//     v3 rounded to one decimal FIRST, then compared. A student on 74.96%
+//     became 75.0, scored "safe", and was told they needed zero more classes.
+//     They were below the line and the college register does not round.
+//     Here: `ratio` is the unrounded fraction and is the only thing compared.
+//     `percentDisplay` exists solely to be printed.
+//
+//  2. NO POOLED NUMBERS.
+//     There is no overall percentage, no subject percentage, no year
+//     percentage. Theory and practical are judged separately at different
+//     thresholds. A pooled 78% can read green while Pathology practical sits
+//     at 68% and the student is debarred.
+//
+//  3. TWO THRESHOLDS, RESOLVED PER SUBJECT PER TYPE.
+//     Defaults 75% theory / 80% practical and clinical, overridable per
+//     subject per type. Passed IN — this file never reads storage to find one.
+//
+//  4. PURE CORE.
+//     Everything in SECTIONS 1–6 is a pure function. No localStorage, no
+//     Date.now() in any comparison path, no hidden state. Sections 7–8 are the
+//     thin storage-backed layer the UI actually calls, and they are the ONLY
+//     part that touches the store.
+//
+//  5. ONE PASS.
+//     v3 walked the session list once per category, per subject, per year.
+//     Here the list is bucketed by subject+category in a single traversal,
+//     then each bucket is reduced. Results memoise on DataVersion.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// THE MARKING MODEL (universal, not configurable):
+//   present        → attended += weight,  conducted += weight
+//   absent         → attended += 0,       conducted += weight
+//   not-conducted  → nothing. Leaves both sides. ("Cancelled" in the UI.)
+//   unmarked       → nothing. Counted only for the "N unmarked" nag.
 // =============================================================================
 
-import type {
-  AcademicYear,
-  CategoryResult,
-  ClassCategory,
-  OverallResult,
-  SafetyBand,
-  Session,
-  SubjectId,
-  SubjectResult,
-  YearResult,
+import {
+  DEFAULT_THRESHOLDS,
+  SAFETY_THRESHOLDS,
+  type AcademicYear,
+  type AttendanceResult,
+  type CategoryResult,
+  type ClassCategory,
+  type DataVersion,
+  type ExtrasBreakdown,
+  type Id,
+  type ISODate,
+  type SafetyBand,
+  type Session,
+  type SubjectId,
+  type SubjectResult,
+  type ThresholdPercent,
+  type YearResult,
 } from './types';
 
-import { SAFETY_THRESHOLDS } from './types';
-
 import {
-  ACADEMIC_YEARS,
   categoriesForSubject,
-  compareSubjects,
-  isExamSubject,
-  subjectName,
+  effectiveExamSubjects,
+  subjectName as curriculumSubjectName,
+  subjectShort,
 } from '@/lib/attendance/curriculum';
 
-import {
-  getEntOphthaInFinalYear,
-  getExclusion,
-  getOpeningBalance,
-  getSettings,
-  isExcluded,
-} from './store';
-
-import { generateForYear } from './generate';
+import { todayISO } from '@/lib/attendance/datetime';
 
 
 // -----------------------------------------------------------------------------
-// SECTION 1 — Primitives
+// SECTION 1 — Pure arithmetic primitives
 //
-// Every number in the app funnels through these three functions, so rounding
-// is identical everywhere. Two screens disagreeing by 0.1% reads as a bug even
-// when both are individually defensible.
+// Small, boring, and individually testable. Every number in the app comes out
+// of one of these five functions.
 // -----------------------------------------------------------------------------
 
 /**
- * attended / conducted as a percentage, one decimal place.
- * Zero conducted returns 0 — callers must check `isEmpty` to distinguish
- * "nothing happened yet" from "you attended nothing".
+ * THE EXACT FRACTION. 0–1. Never rounded.
+ * This is what every comparison in this file uses. See RULE 1.
  */
-export function percentOf(attended: number, conducted: number): number {
+export function exactRatio(attended: number, conducted: number): number {
   if (conducted <= 0) return 0;
-  return Math.round((attended / conducted) * 1000) / 10;
+  return attended / conducted;
 }
 
 /**
- * Which colour band? Bands are relative to the student's target, not to a
- * hardcoded 75 — a department demanding 80% should shade differently.
+ * DISPLAY ONLY. One decimal place.
  *
- *   at or above target                 → safe
- *   within warningMargin below         → warning
- *   within dangerMargin below          → danger
- *   further below                      → critical
+ * ⚠ If you ever find yourself writing `if (percentDisplay >= threshold)`,
+ *   stop. That is the v3 bug, reintroduced. Compare `ratio * 100` instead.
  */
-export function bandFor(percent: number, target: number): SafetyBand {
-  if (percent >= target) return 'safe';
-  const deficit = target - percent;
-  if (deficit <= SAFETY_THRESHOLDS.warningMargin) return 'warning';
-  if (deficit <= SAFETY_THRESHOLDS.dangerMargin) return 'danger';
+export function toDisplayPercent(ratio: number): number {
+  return Math.round(ratio * 1000) / 10;
+}
+
+/**
+ * Where does this sit relative to its own threshold?
+ *
+ * Margins are relative, not absolute, so a 50% ophthalmology theory threshold
+ * gets the same band shape as an 80% practical one.
+ */
+export function bandFor(
+  ratio: number,
+  threshold: ThresholdPercent,
+): SafetyBand {
+  const pct = ratio * 100;
+  if (pct >= threshold) return 'safe';
+  if (pct >= threshold - SAFETY_THRESHOLDS.warningMargin) return 'warning';
+  if (pct >= threshold - SAFETY_THRESHOLDS.dangerMargin) return 'danger';
   return 'critical';
 }
 
 /**
- * How many more classes must be attended, in a row, to reach target?
+ * How many consecutive classes must be attended to reach the threshold?
  *
- *     (attended + n) / (conducted + n) >= target/100
+ * ⚠ THE DENOMINATOR GROWS WITH THE NUMERATOR. Tomorrow's class is 1/1, not
+ *   1/0. Naively computing (needed − attended) understates this badly.
  *
- * Solving for n:
+ *     (attended + x) / (conducted + x) >= t
+ *   → x >= (t·conducted − attended) / (1 − t)
  *
- *     n >= (target*conducted - 100*attended) / (100 - target)
+ * At t = 0.80 the divisor is 0.2, so every skipped class costs FIVE attended
+ * ones to undo. At 0.75 it costs four. Students find this genuinely shocking,
+ * which is exactly why the number is worth showing.
  *
- * Returns 0 when already at target. Returns Infinity when target is 100 and
- * the student has any absence at all — mathematically true and worth saying
- * plainly rather than hiding behind a large finite number.
+ * Returns 0 when already at or above the threshold.
  */
 export function classesNeeded(
   attended: number,
   conducted: number,
-  target: number,
+  threshold: ThresholdPercent,
 ): number {
-  if (conducted <= 0) return 0;
-  if (percentOf(attended, conducted) >= target) return 0;
-  if (target >= 100) return attended >= conducted ? 0 : Infinity;
+  const t = threshold / 100;
+  if (t >= 1) return Number.POSITIVE_INFINITY; // 100% — one absence is fatal
+  if (exactRatio(attended, conducted) >= t) return 0;
 
-  const n = (target * conducted - 100 * attended) / (100 - target);
-  return Math.max(0, Math.ceil(n));
+  const x = (t * conducted - attended) / (1 - t);
+  return Math.max(0, Math.ceil(x - 1e-9)); // epsilon guards float dust
 }
 
 /**
- * How many upcoming classes can be missed before dropping below target?
+ * How many more can be skipped while staying at or above the threshold?
  *
- *     attended / (conducted + n) >= target/100
- *     n <= (100*attended / target) - conducted
+ *     attended / (conducted + x) >= t
+ *   → x <= attended/t − conducted
  *
- * Returns 0 when already below target — the honest answer to "how many can I
- * skip?" when you are already short is "none, and you owe some".
+ * Returns 0 when already below — you cannot afford to miss a class you are
+ * already failing.
  */
 export function classesSkippable(
   attended: number,
   conducted: number,
-  target: number,
+  threshold: ThresholdPercent,
 ): number {
-  if (conducted <= 0) return 0;
-  if (target <= 0) return Infinity;
-  if (percentOf(attended, conducted) < target) return 0;
+  const t = threshold / 100;
+  if (t <= 0) return Number.POSITIVE_INFINITY;
+  if (exactRatio(attended, conducted) < t) return 0;
 
-  const n = (100 * attended) / target - conducted;
-  return Math.max(0, Math.floor(n));
-}
-
-
-// -----------------------------------------------------------------------------
-// SECTION 2 — Counting one category
-//
-// The weighting rule: a session contributes its WEIGHT, not 1. A three-hour
-// clinical block the college logs as three classes has weight 3, and both
-// numerator and denominator move by 3.
-//
-// Status semantics:
-//   present        → numerator + denominator
-//   absent         → denominator only
-//   not-conducted  → neither. Removed from existence, not counted as a miss.
-//   unmarked       → neither. It has not happened yet, or the student has not
-//                    said. Counting it either way would be a guess.
-// -----------------------------------------------------------------------------
-
-interface RawCount {
-  conducted: number;
-  attended: number;
-  /** Sessions that exist but are still unmarked. Drives the "N to mark" nudge. */
-  unmarked: number;
-}
-
-const EMPTY_COUNT: RawCount = { conducted: 0, attended: 0, unmarked: 0 };
-
-function countSessions(sessions: Session[]): RawCount {
-  let conducted = 0;
-  let attended = 0;
-  let unmarked = 0;
-
-  for (const s of sessions) {
-    const w = s.weight > 0 ? s.weight : 1;
-
-    switch (s.status) {
-      case 'present':
-        conducted += w;
-        attended += w;
-        break;
-      case 'absent':
-        conducted += w;
-        break;
-      case 'unmarked':
-        unmarked += w;
-        break;
-      case 'not-conducted':
-      default:
-        break;
-    }
-  }
-  return { conducted, attended, unmarked };
+  return Math.max(0, Math.floor(attended / t - conducted + 1e-9));
 }
 
 /**
- * Splits a category's sessions by whether they came from an extra class.
+ * Is the threshold still mathematically reachable?
  *
- * Needed because extraClassPolicy decides whether extras touch the
- * DENOMINATOR, and that decision cannot be made while counting — the two
- * groups have to be tallied separately first.
+ * Best case: every remaining class is attended. If even that falls short,
+ * the target is gone and the UI should say so rather than print a number the
+ * student cannot act on.
  */
-function splitExtras(sessions: Session[]): {
-  regular: Session[];
-  extra: Session[];
-} {
-  const regular: Session[] = [];
-  const extra: Session[] = [];
-  for (const s of sessions) {
-    if (s.origin === 'extra') extra.push(s);
-    else regular.push(s);
-  }
-  return { regular, extra };
+export function isUnreachable(
+  attended: number,
+  conducted: number,
+  remainingWeight: number,
+  threshold: ThresholdPercent,
+): boolean {
+  const best = exactRatio(attended + remainingWeight, conducted + remainingWeight);
+  return best * 100 < threshold;
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 3 — One category result
+// SECTION 2 — Bucketing
 //
-// ⚠ TRAP 2 LIVES HERE.
-//   When a subject/category is excluded, BOTH its sessions AND its opening
-//   balance are skipped. Dropping only the sessions leaves the carried-forward
-//   figures silently inflating the total — and because the resulting number is
-//   still plausible, nobody notices until an exam board disagrees.
+// ONE traversal of the session list. See RULE 5.
 //
-// ⚠ EXTRA CLASS POLICY.
-//   'add'    → extras behave exactly like regular classes. Both numerator and
-//              denominator move. The percentage can go down if you skip one.
-//   'ignore' → extras add to the NUMERATOR only. The denominator is untouched.
-//              This is the "makeup classes repair your percentage without
-//              changing how many were conducted" model some departments use.
-//              The result is clamped to 100, because 34/30 is not a percentage
-//              anyone can put on a form.
+// The key is `subjectId::category`. Everything downstream is a map lookup.
 // -----------------------------------------------------------------------------
 
-export interface CategoryOptions {
-  year: AcademicYear;
+export type BucketKey = string;
+
+export function bucketKey(subjectId: SubjectId, category: ClassCategory): BucketKey {
+  return `${subjectId}::${category}`;
+}
+
+export interface Bucket {
   subjectId: SubjectId;
   category: ClassCategory;
-  target: number;
-  extraPolicy: 'add' | 'ignore';
-  /** Pre-filtered to this year/subject/category by the caller. */
+  subjectName: string;
   sessions: Session[];
 }
 
-export function categoryResult(options: CategoryOptions): CategoryResult {
-  const { year, subjectId, category, target, extraPolicy, sessions } = options;
+/** Single pass. O(n) in sessions, regardless of how many subjects exist. */
+export function bucketSessions(sessions: Session[]): Map<BucketKey, Bucket> {
+  const buckets = new Map<BucketKey, Bucket>();
 
-  const excluded = isExcluded(year, subjectId, category);
+  for (const s of sessions) {
+    const key = bucketKey(s.subjectId, s.category);
+    let bucket = buckets.get(key);
 
-  // ---- Excluded: zeroed out entirely, opening balance included. TRAP 2. ----
-  if (excluded) {
-    return {
-      category,
-      conducted: 0,
-      attended: 0,
-      percent: 0,
-      isEmpty: true,
-      band: 'safe',
-      canSkip: 0,
-      mustAttend: 0,
-      targetUnreachable: false,
-    };
+    if (!bucket) {
+      bucket = {
+        subjectId: s.subjectId,
+        category: s.category,
+        subjectName: s.subjectName || curriculumSubjectName(s.subjectId),
+        sessions: [],
+      };
+      buckets.set(key, bucket);
+    }
+    bucket.sessions.push(s);
+  }
+  return buckets;
+}
+
+
+// -----------------------------------------------------------------------------
+// SECTION 3 — Extra-class denominator policy
+//
+// ★ THE SEPARATION THAT MAKES v4 SAFE
+//
+//   In v3 this was ONE GLOBAL SETTING. Flipping it swept through regular
+//   classes as well as extras — the trap that prompted this rebuild.
+//
+//   In v4 the flag lives on each ExtraClass. Regular and posting sessions
+//   have NO such field, so recalculating extras is structurally incapable of
+//   reaching them. The type system enforces it; nobody has to remember.
+//
+// ⚠ KNOWN GAP, TEMPORARY
+//   generate.ts does not yet copy the flag onto the sessions it emits, so
+//   extra sessions currently arrive with countsTowardDenominator === undefined.
+//   Until that is fixed (build step 4), callers pass `extraPolicy` — a map of
+//   extraClassId → boolean — and this function falls back to it.
+//
+//   Order of precedence, deliberately:
+//     1. the session's own flag, once generate.ts sets it
+//     2. the caller's lookup
+//     3. true, matching the old 'add' default, so nobody's totals shift
+//        silently under them during the transition
+// -----------------------------------------------------------------------------
+
+export type ExtraPolicyLookup = Readonly<Record<Id, boolean>>;
+
+export function extraCountsTowardDenominator(
+  session: Session,
+  lookup?: ExtraPolicyLookup,
+): boolean {
+  if (session.origin !== 'extra') {
+    // Not an extra. This question does not apply, and a regular class ALWAYS
+    // counts. Returning true here is not a policy decision — it is the
+    // definition of a scheduled class.
+    return true;
+  }
+  if (typeof session.countsTowardDenominator === 'boolean') {
+    return session.countsTowardDenominator;
+  }
+  if (lookup && session.extraClassId && session.extraClassId in lookup) {
+    return lookup[session.extraClassId];
+  }
+  return true;
+}
+
+
+// -----------------------------------------------------------------------------
+// SECTION 4 — Category result: the single unit of truth
+//
+// Every number a student sees is one of these. Subjects and years are just
+// collections of them — they carry no arithmetic of their own. See RULE 2.
+// -----------------------------------------------------------------------------
+
+export interface CategoryInput {
+  category: ClassCategory;
+  sessions: Session[];
+  /** Resolved threshold. Already merged: override if set, otherwise default. */
+  threshold: ThresholdPercent;
+  /** True when the student overrode the default for this exact key. */
+  isCustomThreshold: boolean;
+  /** Carried-forward figures. Null when none. ⚠ TRAP 2: ignored when excluded. */
+  openingBalance: { conducted: number; attended: number } | null;
+  isExcluded: boolean;
+  /** Anything dated after this is "future" and cannot be overdue. */
+  today: ISODate;
+  extraPolicy?: ExtraPolicyLookup;
+}
+
+export function computeCategory(input: CategoryInput): CategoryResult {
+  const { category, sessions, threshold, isExcluded, today } = input;
+
+  // Regular + extras, clubbed. This is the DEFAULT view the student sees.
+  let conducted = 0;
+  let attended = 0;
+
+  // Extras alone, for the semi-hidden breakdown. Never the default view.
+  let extraConducted = 0;
+  let extraAttended = 0;
+  let sawExtra = false;
+
+  // Weight of classes still to come — drives targetUnreachable.
+  let remainingWeight = 0;
+
+  // Past sessions with no mark. Drives the "N unmarked" nag.
+  let unmarkedCount = 0;
+
+  for (const s of sessions) {
+    const w = s.weight > 0 ? s.weight : 1;
+    const isExtra = s.origin === 'extra';
+    if (isExtra) sawExtra = true;
+
+    switch (s.status) {
+      case 'present': {
+        // ★ An extra with countsTowardDenominator === false raises the
+        //   numerator only. That is the whole point: a makeup class that
+        //   earns credit without inflating the total.
+        const countsDenominator = extraCountsTowardDenominator(s, input.extraPolicy);
+        attended += w;
+        if (countsDenominator) conducted += w;
+
+        if (isExtra) {
+          extraAttended += w;
+          if (countsDenominator) extraConducted += w;
+        }
+        break;
+      }
+
+      case 'absent': {
+        const countsDenominator = extraCountsTowardDenominator(s, input.extraPolicy);
+        if (countsDenominator) conducted += w;
+        if (isExtra && countsDenominator) extraConducted += w;
+        break;
+      }
+
+      case 'not-conducted':
+        // 0/0. Vanishes from both sides. Cancelled classes and blocked exam
+        // weeks must never damage a percentage.
+        break;
+
+      case 'unmarked':
+      default:
+        if (s.date > today) remainingWeight += w;
+        else unmarkedCount += 1;
+        break;
+    }
   }
 
-  const { regular, extra } = splitExtras(sessions);
-  const regularCount = countSessions(regular);
-  const extraCount = extra.length > 0 ? countSessions(extra) : EMPTY_COUNT;
-
-  // ---- Opening balance. Only reached when NOT excluded. ----
-  const opening = getOpeningBalance(year, subjectId, category);
-
-  let conducted = regularCount.conducted + (opening?.conducted ?? 0);
-  let attended = regularCount.attended + (opening?.attended ?? 0);
-
-  if (extraPolicy === 'add') {
-    conducted += extraCount.conducted;
-    attended += extraCount.attended;
-  } else {
-    // 'ignore' — numerator only, denominator untouched.
-    attended += extraCount.attended;
+  // ⚠ TRAP 2 — an excluded category's opening balance is excluded too.
+  //   Half-applying an exclusion is worse than not applying it at all.
+  if (input.openingBalance && !isExcluded) {
+    conducted += Math.max(0, input.openingBalance.conducted);
+    attended += Math.max(0, Math.min(input.openingBalance.attended, input.openingBalance.conducted));
   }
 
-  // Under 'ignore', enough makeup classes can push attended past conducted.
-  // Clamp rather than report a percentage above 100.
+  // Defensive: a corrupt import could make attended exceed conducted, which
+  // would render as 104% and destroy trust in every other number on screen.
   if (attended > conducted) attended = conducted;
 
-  const isEmpty = conducted === 0;
-  const percent = percentOf(attended, conducted);
+  const isEmpty = conducted <= 0;
+  const ratio = exactRatio(attended, conducted);
 
-  const mustAttendRaw = classesNeeded(attended, conducted, target);
-  const unreachable = !Number.isFinite(mustAttendRaw);
+  const extrasOnly: ExtrasBreakdown | null = sawExtra
+    ? {
+        conducted: extraConducted,
+        attended: Math.min(extraAttended, Math.max(extraConducted, extraAttended)),
+        ratio: exactRatio(extraAttended, extraConducted),
+        isEmpty: extraConducted <= 0,
+      }
+    : null;
 
   return {
     category,
+    threshold,
+    isCustomThreshold: input.isCustomThreshold,
     conducted,
     attended,
-    percent,
+    ratio,
+    percentDisplay: toDisplayPercent(ratio),
     isEmpty,
-    band: isEmpty ? 'safe' : bandFor(percent, target),
-    canSkip: isEmpty ? 0 : classesSkippable(attended, conducted, target),
-    mustAttend: unreachable ? 0 : mustAttendRaw,
-    targetUnreachable: unreachable,
+    band: isEmpty ? 'safe' : bandFor(ratio, threshold),
+    mustAttend: isEmpty ? 0 : classesNeeded(attended, conducted, threshold),
+    canSkip: isEmpty ? 0 : classesSkippable(attended, conducted, threshold),
+    targetUnreachable: isEmpty
+      ? false
+      : isUnreachable(attended, conducted, remainingWeight, threshold),
+    extrasOnly,
+    isExcluded,
+    unmarkedCount,
   };
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 4 — One subject result
+// SECTION 5 — Subject result
 //
-// ⚠ TRAP 9 — only categories that actually have data are returned. A subject
-//   with theory sessions and no practicals returns ONE category, not two with
-//   a fake 0%.
+// A named bag of CategoryResults plus the worst band, which colours the LABEL.
 //
-// The subject-level total is the SUM of its categories, not the average of
-// their percentages. Averaging 90% of 10 classes with 50% of 100 classes gives
-// 70%, which is wrong by a wide margin — the real figure is 53.6%.
+// ⚠ NO conducted, attended, percent or band on the subject itself. Those four
+//   fields existed in v3 and each one was a pooled number. See RULE 2.
+//
+// ⚠ TRAP 9 — only categories with real data appear. The curriculum says what
+//   is POSSIBLE; the timetable says what is REAL. A student who never entered
+//   an ENT practical must never see "ENT Practical — 0%".
 // -----------------------------------------------------------------------------
 
-export interface SubjectOptions {
-  year: AcademicYear;
+const BAND_SEVERITY: Record<SafetyBand, number> = {
+  safe: 0,
+  warning: 1,
+  danger: 2,
+  critical: 3,
+};
+
+export function worstBandOf(categories: CategoryResult[]): SafetyBand {
+  let worst: SafetyBand = 'safe';
+  for (const c of categories) {
+    // An excluded or empty category cannot drag the label down — there is
+    // nothing to be failing.
+    if (c.isExcluded || c.isEmpty) continue;
+    if (BAND_SEVERITY[c.band] > BAND_SEVERITY[worst]) worst = c.band;
+  }
+  return worst;
+}
+
+export interface SubjectInput {
   subjectId: SubjectId;
-  target: number;
-  extraPolicy: 'add' | 'ignore';
-  /** Pre-filtered to this year and subject. */
-  sessions: Session[];
-  examOverrides: Partial<Record<AcademicYear, SubjectId[]>> | undefined;
-  entOphthaInFinalYear: boolean;
+  academicYear: AcademicYear;
+  categories: CategoryResult[];
+  isExamSubject: boolean;
 }
 
-export function subjectResult(options: SubjectOptions): SubjectResult {
-  const {
-    year,
-    subjectId,
-    target,
-    extraPolicy,
-    sessions,
-    examOverrides,
-    entOphthaInFinalYear,
-  } = options;
-
-  // Which categories does this subject legally have, and of those, which
-  // actually appear in the student's data? Intersection of the two.
-  const legal = categoriesForSubject(subjectId);
-  const present = new Set(sessions.map((s) => s.category));
-  const active = legal.filter((c) => present.has(c));
-
-  const categories: CategoryResult[] = active.map((category) =>
-    categoryResult({
-      year,
-      subjectId,
-      category,
-      target,
-      extraPolicy,
-      sessions: sessions.filter((s) => s.category === category),
-    }),
-  );
-
-  // Sum, never average. See the note above.
-  const conducted = categories.reduce((n, c) => n + c.conducted, 0);
-  const attended = categories.reduce((n, c) => n + c.attended, 0);
-  const percent = percentOf(attended, conducted);
-
-  const exclusion = getExclusion(year, subjectId);
-  const fullyExcluded =
-    exclusion.whole === true ||
-    (active.length > 0 && active.every((c) => isExcluded(year, subjectId, c)));
+export function computeSubject(input: SubjectInput): SubjectResult {
+  const { subjectId, academicYear, categories, isExamSubject } = input;
 
   return {
     subjectId,
-    subjectName: subjectName(subjectId),
-    academicYear: year,
+    subjectName: curriculumSubjectName(subjectId),
+    shortCode: subjectShort(subjectId),
+    academicYear,
     categories,
-    conducted,
-    attended,
-    percent,
-    band: conducted === 0 ? 'safe' : bandFor(percent, target),
-    isExcluded: fullyExcluded,
-    // ⚠ TRAP 8 — reported, not enforced. curriculum.ts owns the rule; the UI
-    // calls getExclusionLock() before rendering a toggle.
-    isExamSubject: isExamSubject(
-      subjectId,
-      year,
-      examOverrides,
-      entOphthaInFinalYear,
-    ),
+    worstBand: worstBandOf(categories),
+    isExcluded: categories.length > 0 && categories.every((c) => c.isExcluded),
+    isExamSubject,
   };
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 5 — One year result
+// SECTION 6 — Year result (pure)
 //
-// ⚠ TRAP 9 — the subject list is derived from the SESSIONS, not from the
-//   curriculum. If the student never scheduled it, it does not appear.
+// The pure entry point. Everything it needs is passed in; it reads nothing.
+// This is the function to unit-test — no store, no fixtures, no mocking.
 // -----------------------------------------------------------------------------
 
-export interface YearOptions {
-  year: AcademicYear;
-  /** Omit to generate from storage. Pass explicitly in tests. */
-  sessions?: Session[];
+export interface YearInput {
+  academicYear: AcademicYear;
+  sessions: Session[];
+  /** Resolve a threshold. Wire to store.getThreshold, or a literal in tests. */
+  resolveThreshold: (
+    subjectId: SubjectId,
+    category: ClassCategory,
+  ) => ThresholdPercent;
+  /** Has the student overridden this one? Purely cosmetic — "(your setting)". */
+  isCustomThreshold?: (
+    subjectId: SubjectId,
+    category: ClassCategory,
+  ) => boolean;
+  resolveOpeningBalance?: (
+    subjectId: SubjectId,
+    category: ClassCategory,
+  ) => { conducted: number; attended: number } | null;
+  resolveExcluded?: (subjectId: SubjectId, category: ClassCategory) => boolean;
+  /** Exam subjects for this year. Drives what the main page shows. */
+  examSubjectIds?: readonly SubjectId[];
+  extraPolicy?: ExtraPolicyLookup;
+  /** Injectable so tests are not hostage to the system clock. */
+  today?: ISODate;
 }
 
-export function yearResult(options: YearOptions): YearResult {
-  const { year } = options;
-  const settings = getSettings();
-  const target = settings.term.targetPercent;
-  const extraPolicy = settings.extraClassPolicy;
+export function computeYear(input: YearInput): YearResult {
+  const {
+    academicYear,
+    sessions,
+    resolveThreshold,
+    isCustomThreshold,
+    resolveOpeningBalance,
+    resolveExcluded,
+    examSubjectIds,
+    extraPolicy,
+  } = input;
 
-  // Lives in the PROFILE store, not attendance settings. Read via the bridge
-  // in store.ts so the cross-store read happens in exactly one place.
-  const entOphtha = getEntOphthaInFinalYear();
+  const today = input.today ?? todayISO();
+  const buckets = bucketSessions(sessions);
+  const examSet = new Set(examSubjectIds ?? []);
 
-  const sessions = options.sessions ?? generateForYear(year);
+  // subjectId → its category results
+  const bySubject = new Map<SubjectId, CategoryResult[]>();
 
-  // TRAP 9: subjects come from real data only.
-  const subjectIds = [...new Set(sessions.map((s) => s.subjectId))].sort(
-    compareSubjects,
-  );
+  for (const bucket of buckets.values()) {
+    const { subjectId, category } = bucket;
 
-  const subjects = subjectIds.map((subjectId) =>
-    subjectResult({
-      year,
-      subjectId,
-      target,
+    // ⚠ TRAP 9 — drop a category the curriculum says this subject cannot
+    //   have. A clinical subject has no practicals; data claiming otherwise
+    //   is corrupt, and showing it would confuse more than it informs.
+    if (!categoriesForSubject(subjectId).includes(category)) continue;
+
+    const result = computeCategory({
+      category,
+      sessions: bucket.sessions,
+      threshold: resolveThreshold(subjectId, category),
+      isCustomThreshold: isCustomThreshold?.(subjectId, category) ?? false,
+      openingBalance: resolveOpeningBalance?.(subjectId, category) ?? null,
+      isExcluded: resolveExcluded?.(subjectId, category) ?? false,
+      today,
       extraPolicy,
-      sessions: sessions.filter((s) => s.subjectId === subjectId),
-      examOverrides: settings.examSubjectsByYear,
-      entOphthaInFinalYear: entOphtha,
-    }),
-  );
+    });
 
-  // Excluded subjects contribute nothing. Their categoryResult already
-  // returned zeros, so this sum is correct without a second filter — but the
-  // filter is kept explicit so the intent survives a future refactor.
-  const counted = subjects.filter((s) => !s.isExcluded);
-
-  const conducted = counted.reduce((n, s) => n + s.conducted, 0);
-  const attended = counted.reduce((n, s) => n + s.attended, 0);
-  const percent = percentOf(attended, conducted);
-
-  return {
-    academicYear: year,
-    subjects,
-    conducted,
-    attended,
-    percent,
-    band: conducted === 0 ? 'safe' : bandFor(percent, target),
-  };
-}
-
-
-// -----------------------------------------------------------------------------
-// SECTION 6 — Overall result
-//
-// Every year the student has data for, plus a cumulative total.
-//
-// ⚠ TRAP 9 again — a year with no sessions at all is omitted entirely. A
-//   third-year does not want to scroll past three empty year cards.
-// -----------------------------------------------------------------------------
-
-export function overallResult(): OverallResult {
-  const settings = getSettings();
-  const target = settings.term.targetPercent;
-
-  const years: YearResult[] = [];
-
-  for (const year of ACADEMIC_YEARS) {
-    const sessions = generateForYear(year);
-    if (sessions.length === 0) continue; // TRAP 9
-    years.push(yearResult({ year, sessions }));
+    const list = bySubject.get(subjectId) ?? [];
+    list.push(result);
+    bySubject.set(subjectId, list);
   }
 
-  const conducted = years.reduce((n, y) => n + y.conducted, 0);
-  const attended = years.reduce((n, y) => n + y.attended, 0);
-  const percent = percentOf(attended, conducted);
+  // Also surface categories that have an opening balance but no sessions yet
+  // — a student who started mid-year and has not marked anything since must
+  // still see their carried-forward figures.
+  if (resolveOpeningBalance) {
+    for (const subjectId of bySubject.keys()) {
+      const have = new Set(bySubject.get(subjectId)!.map((c) => c.category));
 
+      for (const category of categoriesForSubject(subjectId)) {
+        if (have.has(category)) continue;
+
+        const ob = resolveOpeningBalance(subjectId, category);
+        if (!ob || ob.conducted <= 0) continue;
+
+        bySubject.get(subjectId)!.push(
+          computeCategory({
+            category,
+            sessions: [],
+            threshold: resolveThreshold(subjectId, category),
+            isCustomThreshold: isCustomThreshold?.(subjectId, category) ?? false,
+            openingBalance: ob,
+            isExcluded: resolveExcluded?.(subjectId, category) ?? false,
+            today,
+            extraPolicy,
+          }),
+        );
+      }
+    }
+  }
+
+  // Stable display order: theory always before practical/clinical, matching
+  // the outer/inner ring pairing.
+  const ORDER: ClassCategory[] = ['theory', 'practical', 'clinical'];
+
+  const subjects: SubjectResult[] = [...bySubject.entries()]
+    .map(([subjectId, categories]) =>
+      computeSubject({
+        subjectId,
+        academicYear,
+        categories: categories.sort(
+          (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category),
+        ),
+        isExamSubject: examSet.has(subjectId),
+      }),
+    )
+    .sort((a, b) => {
+      // Exam subjects first, then worst band, then name. The student's eye
+      // should land on what can actually hurt them.
+      if (a.isExamSubject !== b.isExamSubject) return a.isExamSubject ? -1 : 1;
+      const bandDiff = BAND_SEVERITY[b.worstBand] - BAND_SEVERITY[a.worstBand];
+      if (bandDiff !== 0) return bandDiff;
+      return a.subjectName.localeCompare(b.subjectName);
+    });
+
+  // ⚠ No conducted, no attended, no percent, no band. Deliberately.
+  return { academicYear, subjects };
+}
+
+
+// -----------------------------------------------------------------------------
+// SECTION 7 — Memoisation
+//
+// RULE 5, the performance half.
+//
+// Computing on every read is only cheap if it is done once per change. The
+// cache is keyed by DataVersion, which store.ts bumps on every mutating write
+// — a mark, a threshold edit, an exclusion toggle, a timetable change.
+//
+// ★ IN MEMORY ONLY. Nothing derived is ever written to storage. That is what
+//   makes a stale number impossible: there is nowhere for one to survive.
+//   Reload the page and the cache is simply gone, which is correct.
+// -----------------------------------------------------------------------------
+
+interface CacheEntry {
+  version: DataVersion;
+  result: YearResult;
+}
+
+const yearCache = new Map<AcademicYear, CacheEntry>();
+
+export function invalidateCalculationCache(): void {
+  yearCache.clear();
+}
+
+/** Diagnostics for the dev panel. Never shown to a student. */
+export function cacheStats(): { entries: number; years: AcademicYear[] } {
+  return { entries: yearCache.size, years: [...yearCache.keys()] };
+}
+
+
+// -----------------------------------------------------------------------------
+// SECTION 8 — Storage-backed convenience layer
+//
+// THE ONLY PART OF THIS FILE THAT TOUCHES THE STORE.
+//
+// Imports are deliberately at the bottom of the dependency graph: the pure
+// core above has no idea these exist, so it stays testable in isolation.
+// -----------------------------------------------------------------------------
+
+import {
+  getDataVersion,
+  getExtraClasses,
+  getOpeningBalance,
+  getSettings,
+  getThreshold,
+  hasCustomThreshold,
+  isExcluded as storeIsExcluded,
+} from './store';
+
+import { generateForYear } from './generate';
+import { getEntOphthaInFinalYear } from './store';
+
+/** extraClassId → countsTowardDenominator, until generate.ts carries the flag. */
+function extraPolicyFor(year: AcademicYear): ExtraPolicyLookup {
+  const out: Record<Id, boolean> = {};
+  for (const x of getExtraClasses(year)) {
+    out[x.id] = x.countsTowardDenominator;
+  }
+  return out;
+}
+
+/**
+ * The function the UI calls. Memoised on DataVersion, so repeated reads within
+ * one render pass cost a map lookup.
+ */
+export function getYearResult(year: AcademicYear): YearResult {
+  const version = getDataVersion();
+  const cached = yearCache.get(year);
+  if (cached && cached.version === version) return cached.result;
+
+  const settings = getSettings();
+
+  const result = computeYear({
+    academicYear: year,
+    sessions: generateForYear(year),
+    resolveThreshold: (subjectId, category) =>
+      getThreshold(year, subjectId, category),
+    isCustomThreshold: (subjectId, category) =>
+      hasCustomThreshold(year, subjectId, category),
+    resolveOpeningBalance: (subjectId, category) =>
+      getOpeningBalance(year, subjectId, category),
+    resolveExcluded: (subjectId, category) =>
+      storeIsExcluded(year, subjectId, category),
+    examSubjectIds: effectiveExamSubjects(
+      year,
+      settings.examSubjectsByYear,
+      getEntOphthaInFinalYear(),
+    ),
+    extraPolicy: extraPolicyFor(year),
+  });
+
+  yearCache.set(year, { version, result });
+  return result;
+}
+
+/**
+ * Every year the student has data for.
+ *
+ * ⚠ Returns a LIST, with no totals attached. If you are ever tempted to add a
+ *   percentage to AttendanceResult, re-read RULE 2 at the top of this file.
+ */
+export function getAttendanceResult(years: readonly AcademicYear[]): AttendanceResult {
   return {
-    years,
-    conducted,
-    attended,
-    percent,
-    band: conducted === 0 ? 'safe' : bandFor(percent, target),
-    // Stamped so the UI can prove freshness during debugging. Not a cache key.
+    years: years.map(getYearResult),
+    version: getDataVersion(),
     computedAt: Date.now(),
   };
 }
 
-
-// -----------------------------------------------------------------------------
-// SECTION 7 — Projections
-//
-// "How many extra classes do I need to attend to reach 75%?"
-//
-// The answer depends on extraClassPolicy, and the two answers are very
-// different — which is exactly why the student sets the policy once and never
-// thinks about it again.
-//
-//   'add'    → an extra class moves numerator AND denominator. Repairing a
-//              shortfall is slow, because each attended class also raises the
-//              bar. Same arithmetic as classesNeeded().
-//
-//   'ignore' → an extra class moves the numerator only. Each one is worth far
-//              more, and the requirement is simply the gap to target.
-// -----------------------------------------------------------------------------
-
-export interface Projection {
-  /** Current figures the projection was computed from. */
-  conducted: number;
-  attended: number;
-  percent: number;
-  target: number;
-  /** Extra classes required to reach target. 0 when already there. */
-  extraNeeded: number;
-  /** True when target cannot be reached by attending extras. */
-  impossible: boolean;
-  /** Ready-to-render sentence. */
-  message: string;
+/** Exam-year subjects only — what the main attendance page renders. */
+export function getExamSubjects(year: AcademicYear): SubjectResult[] {
+  return getYearResult(year).subjects.filter((s) => s.isExamSubject && !s.isExcluded);
 }
 
-export function projectExtraClassesNeeded(
-  attended: number,
-  conducted: number,
-  target: number,
-  policy: 'add' | 'ignore',
-): Projection {
-  const percent = percentOf(attended, conducted);
-
-  const base: Omit<Projection, 'extraNeeded' | 'impossible' | 'message'> = {
-    conducted,
-    attended,
-    percent,
-    target,
-  };
-
-  if (conducted === 0) {
-    return {
-      ...base,
-      extraNeeded: 0,
-      impossible: false,
-      message: 'No classes recorded yet.',
-    };
-  }
-
-  if (percent >= target) {
-    return {
-      ...base,
-      extraNeeded: 0,
-      impossible: false,
-      message: `You are at ${percent}% — already above the ${target}% requirement.`,
-    };
-  }
-
-  if (policy === 'ignore') {
-    // Denominator frozen. Need attended >= target% of the existing conducted.
-    const required = Math.ceil((target / 100) * conducted);
-    const needed = Math.max(0, required - attended);
-    const reachable = required <= conducted;
-
-    return {
-      ...base,
-      extraNeeded: reachable ? needed : 0,
-      impossible: !reachable,
-      message: reachable
-        ? `Attend ${needed} extra ${needed === 1 ? 'class' : 'classes'} to reach ${target}%.`
-        : `${target}% cannot be reached — it would need more attendance than classes conducted.`,
-    };
-  }
-
-  // 'add' — each extra raises the bar as well as the score.
-  const needed = classesNeeded(attended, conducted, target);
-
-  if (!Number.isFinite(needed)) {
-    return {
-      ...base,
-      extraNeeded: 0,
-      impossible: true,
-      message: `${target}% cannot be reached by attending extra classes.`,
-    };
-  }
-
-  return {
-    ...base,
-    extraNeeded: needed,
-    impossible: false,
-    message: `Attend ${needed} extra ${needed === 1 ? 'class' : 'classes'} in a row to reach ${target}%.`,
-  };
+/** Everything else. Tracked silently, shown on the subject page and settings. */
+export function getNonExamSubjects(year: AcademicYear): SubjectResult[] {
+  return getYearResult(year).subjects.filter((s) => !s.isExamSubject || s.isExcluded);
 }
 
-/** Projection for one subject/category, read straight from current data. */
-export function projectForCategory(
-  year: AcademicYear,
-  subjectId: SubjectId,
-  category: ClassCategory,
-): Projection {
-  const settings = getSettings();
-  const sessions = generateForYear(year).filter(
-    (s) => s.subjectId === subjectId && s.category === category,
-  );
-
-  const result = categoryResult({
-    year,
-    subjectId,
-    category,
-    target: settings.term.targetPercent,
-    extraPolicy: settings.extraClassPolicy,
-    sessions,
-  });
-
-  return projectExtraClassesNeeded(
-    result.attended,
-    result.conducted,
-    settings.term.targetPercent,
-    settings.extraClassPolicy,
+/** Total unmarked past sessions for a year. Drives the "N unmarked" chip. */
+export function getUnmarkedCount(year: AcademicYear): number {
+  return getYearResult(year).subjects.reduce(
+    (n, s) => n + s.categories.reduce((m, c) => m + c.unmarkedCount, 0),
+    0,
   );
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 8 — Display helpers
+// SECTION 9 — Status text
 //
-// Kept here so the marking page, the summary page and any future widget all
-// phrase the same number identically.
+// ⚠ REVEALED ON RING TAP ONLY. Never on the resting screen.
+//   The resting view is rings and colour; numbers appear when asked for.
 // -----------------------------------------------------------------------------
 
-/** "92.5%" — or "—" when nothing has been conducted. Never "0%" for empty. */
-export function formatPercent(result: {
-  percent: number;
-  isEmpty?: boolean;
-  conducted: number;
-}): string {
-  if (result.isEmpty || result.conducted === 0) return '—';
-  return `${result.percent}%`;
-}
+export function statusLine(result: CategoryResult): string {
+  const { percentDisplay, threshold, mustAttend, canSkip } = result;
 
-/** "45 / 50". */
-export function formatFraction(attended: number, conducted: number): string {
-  return `${attended} / ${conducted}`;
-}
-
-/** Tailwind-friendly tokens. Kept as plain strings so the UI owns the palette. */
-export const BAND_LABEL: Readonly<Record<SafetyBand, string>> = Object.freeze({
-  safe: 'Safe',
-  warning: 'Watch',
-  danger: 'At risk',
-  critical: 'Critical',
-});
-
-/**
- * The one-line status a student actually wants to read.
- * Phrased around what they can do, not around what the number is.
- */
-export function statusLine(result: CategoryResult, target: number): string {
   if (result.isEmpty) return 'No classes recorded yet.';
+  if (result.isExcluded) return 'Excluded from your calculations.';
 
-  if (result.percent >= target) {
-    if (result.canSkip === 0) {
-      return `At ${result.percent}%. Attend the next one to stay above ${target}%.`;
+  if (result.band === 'safe') {
+    if (canSkip === 0) {
+      return `At ${percentDisplay}%. Attend the next one to stay above ${threshold}%.`;
     }
-    return `At ${result.percent}%. You can miss ${result.canSkip} more and stay above ${target}%.`;
+    return `At ${percentDisplay}%. You can miss ${canSkip} more and stay above ${threshold}%.`;
   }
 
   if (result.targetUnreachable) {
-    return `At ${result.percent}%. ${target}% is no longer reachable this term.`;
+    return `At ${percentDisplay}%. ${threshold}% is no longer reachable this term.`;
   }
 
-  return `At ${result.percent}%. Attend ${result.mustAttend} in a row to reach ${target}%.`;
+  return `At ${percentDisplay}%. Attend ${mustAttend} in a row to reach ${threshold}%.`;
 }
+
+/** Short form for the expanded ring: "34/50 · need 6". */
+export function shortStatus(result: CategoryResult): string {
+  if (result.isEmpty) return '—';
+  const base = `${result.attended}/${result.conducted}`;
+  if (result.mustAttend > 0) return `${base} · need ${result.mustAttend}`;
+  if (result.canSkip > 0) return `${base} · ${result.canSkip} spare`;
+  return base;
+}
+
+
+// =============================================================================
+// NEXT FILE — generate.ts
+//   1. Copy countsTowardDenominator onto extra sessions, so SECTION 3's
+//      lookup fallback becomes dead code and can be deleted.
+//   2. Filter regular sessions by settings.college.workingDays — a 6-day
+//      college currently generates Sunday classes.
+//   3. Cache the term expansion; generateForYear() rebuilds it on every call.
+// =============================================================================
