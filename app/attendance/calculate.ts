@@ -4,7 +4,7 @@
 // The calculator. Sessions in, numbers out.
 //
 // REBUILD v4 — see ATTENDANCE_REBUILD_SPEC.txt
-// PATCHED 25 Sep 2026 — SECTION 6 only. See "BUG 2" note in that section.
+// PATCHED 25 Sep 2026 — SECTION 6 (Bug 2) and SECTION 4 (targetUnreachable).
 //
 // ═════════════════════════════════════════════════════════════════════════════
 //  THE FIVE RULES THIS FILE EXISTS TO ENFORCE
@@ -174,6 +174,10 @@ export function classesSkippable(
  * Best case: every remaining class is attended. If even that falls short,
  * the target is gone and the UI should say so rather than print a number the
  * student cannot act on.
+ *
+ * ⚠ This function answers ONLY the arithmetic question. Whether there IS any
+ *   runway is a separate question, handled by the caller — see the
+ *   targetUnreachable note in SECTION 4.
  */
 export function isUnreachable(
   attended: number,
@@ -311,7 +315,7 @@ export function computeCategory(input: CategoryInput): CategoryResult {
   let extraAttended = 0;
   let sawExtra = false;
 
-  // Weight of classes still to come — drives targetUnreachable.
+  // Weight of classes still to come — the RUNWAY. Drives targetUnreachable.
   let remainingWeight = 0;
 
   // Past sessions with no mark. Drives the "N unmarked" nag.
@@ -393,9 +397,36 @@ export function computeCategory(input: CategoryInput): CategoryResult {
     band: isEmpty ? 'safe' : bandFor(ratio, threshold),
     mustAttend: isEmpty ? 0 : classesNeeded(attended, conducted, threshold),
     canSkip: isEmpty ? 0 : classesSkippable(attended, conducted, threshold),
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ⚠ "UNREACHABLE" REQUIRES RUNWAY — FIXED 25 Sep 2026
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Surgery clinical read "Critical" at 3/5 against an 80% threshold. The
+    //  maths was flawless: isUnreachable(3, 5, 0, 80) → best case 60% → true.
+    //
+    //  But remainingWeight was 0 only because the surgery POSTING BLOCK had
+    //  ended. A finished posting is not a finished term — it almost always
+    //  means the NEXT block has not been entered into the app yet.
+    //
+    //  Two situations were being conflated:
+    //    runway exists, and using all of it still falls short → genuinely lost
+    //    no runway because nothing more is SCHEDULED yet     → simply unknown
+    //
+    //  Declaring the second one Critical punishes a data gap. With no runway
+    //  the band alone carries the severity ("Well behind" in RingGrid), which
+    //  is honest and leaves the student somewhere to go.
+    //
+    //  ⚠ SIDE EFFECT, ACCEPTED: at genuine term end every category has
+    //    remainingWeight 0, so nothing says Critical on the final day. If an
+    //    end-of-term "finalised / below requirement" state is wanted later,
+    //    add an explicit isFinalised flag driven by settings.term.endDate.
+    //    Do NOT revert this line to get it.
+    // ═══════════════════════════════════════════════════════════════════════
     targetUnreachable: isEmpty
       ? false
-      : isUnreachable(attended, conducted, remainingWeight, threshold),
+      : remainingWeight > 0 &&
+        isUnreachable(attended, conducted, remainingWeight, threshold),
+
     extrasOnly,
     isExcluded,
     unmarkedCount,

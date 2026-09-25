@@ -615,3 +615,148 @@ surgery/clinical 3/5, obg/theory 2/2, paediatrics/theory 2/2).
 `npx tsc --noEmit` clean.
 
 NEXT: term fields on the setup screen (Bug 1 permanent fix).
+
+### BUG 2 — FIXED AND VERIFIED — 25 Sep 2026 — calculate.ts SECTION 6
+
+`computeYear()` rewritten to three explicit passes:
+PASS 1 real session buckets; curriculum-illegal categories dropped
+PASS 2 every EXAM subject completed to its full legal category pair with 0/0
+PASS 3 opening-balance-only categories on NON-EXAM subjects (TRAP 9 intact)
+
+`bySubject` is now Map<SubjectId, Map<ClassCategory, CategoryResult>>. The local
+put() helper no-ops on an existing key, so a populated category can never be
+recomputed or overwritten by a later pass.
+
+TRAP 9 NARROWED, not deleted: non-exam subjects still show only categories with
+real data. Exam subjects are exempt — they own a fixed outer/inner ring slot and
+a missing inner ring is worse than an empty one.
+
+VERIFIED in browser: no CATEGORY MISSING, no SUBJECT MISSING in diagnostic
+section 5. medicine and paediatrics now return theory + clinical. All previously
+passing counts unchanged. npx tsc --noEmit clean. Committed.
+
+### STILL OPEN — BUG 1 PERMANENT FIX
+
+The term is currently only settable by hand-editing localStorage key
+medprep.attendance.settings.v4. Any cleared storage or fresh install returns to
+the one-day term (today → today) and re-breaks everything. Setup screen needs
+term start/end inputs with validation. THIS IS THE NEXT FILE.
+
+### RING RENDERING — FIXED 25 Sep 2026
+
+Symptom: every ring looked full regardless of attendance; tiles looked cheap.
+
+ROOT CAUSE, not what it appeared to be. The arc maths was correct all along.
+The TRACK was tinted per category — theory track #cfc7dd against arc #7c3aed.
+A 0/0 ring drew a complete circle of pale violet, indistinguishable from a
+full violet arc at phone size.
+
+FIX: all tracks are now one neutral grey (#E8E8ED). COLOUR = ATTENDED,
+GREY = MISSED. Drawing delegated to AttendanceRing.tsx, which draws NO arc at
+all when conducted === 0 — an empty ring is a faint dotted track and nothing
+more, so 0/0 can never again read as 100%.
+
+RingGrid.tsx rewritten to:
+
+- pass outer = theory, inner = practical/clinical to AttendanceRing
+- compute geometry from attended/conducted only (never ratio/percentDisplay)
+- drop tile borders; depth from surface + one soft shadow, not outlines
+- two columns on mobile, larger rings, more whitespace
+- hairline threshold notch on the track, replacing 2.5px stubs
+- show the same ring large at the top of the detail modal
+
+tone="category" retained: hue = class type, label = safety. Unchanged rule.
+
+NEW FILE: app/attendance/components/AttendanceRing.tsx — presentational only,
+no store, no calculator, no Tailwind. Gradient arcs, round caps, useId for
+unique gradient ids (duplicate ids make every ring inherit the first one's
+colours — classic SVG trap).
+
+### RING SILHOUETTE — FIXED 25 Sep 2026 — AttendanceRing.tsx
+
+Symptom: "circle doesn't look too circly." Geometry was correct; the OUTLINE
+was being broken by three details:
+
+1. Threshold notch overhung the rim. Drawn radius±(STROKE/2 − 1) with round
+   caps, which add ~half the line width beyond each endpoint → visible stubs
+   at 9 o'clock. Now inset to STROKE/2 − 2.5 with butt caps: a mark ON the
+   ring, never a spur off it.
+2. Empty track used strokeDasharray '1 7' + round caps → scalloped, beaded
+   rim. Now a solid, very light track (#F0F0F4). Lightness says "empty";
+   texture is not needed and costs the outline.
+3. Arc round start-cap mounted the track edge at 12 o'clock. Dash is now
+   trimmed by STROKE/2 so the cap curve completes inside the band.
+
+Also: STROKE 11→13, GAP 7→5, R_OUTER 50→51. Thin hoops with a large hole read
+as wireframe; Activity rings are ~22% of radius and that weight is most of why
+they look solid.
+
+Added shapeRendering:'geometricPrecision' (stops curve points snapping to the
+pixel grid, which makes small circles look polygonal) and flexShrink:0 (stops a
+narrow grid column squashing the SVG into an oval).
+
+### BAND VOCABULARY — FIXED 25 Sep 2026 — RingGrid.tsx
+
+Symptom: three of four subjects read "Critical" simultaneously. A warning that
+describes most of the screen describes nothing.
+
+Cause was semantic, not arithmetic. bandFor() returns 'critical' for anything
+more than dangerMargin below threshold, so a subject at 50% in week four of a
+six-month term qualified — despite being comfortably recoverable.
+
+★ THE DISTINCTION IS REACHABILITY, NOT DISTANCE. calculate.ts already computes
+targetUnreachable (true only when attending EVERY remaining class still misses
+the threshold). It was being computed and ignored.
+
+RingGrid now maps to five display standings, checking targetUnreachable FIRST:
+unreachable → "Critical" (any band, if targetUnreachable)
+critical → "Well behind" (downgraded)
+danger → "Behind"
+warning → "Watch"
+safe → "On track"
+
+Grid sort order now uses standing, not raw band.
+Modal chip and per-category percentage colour use the same mapping.
+
+⚠ DISPLAY ONLY. No band, ratio, threshold or count is recalculated in RingGrid.
+calculate.ts remains the sole source of arithmetic. SafetyBand in types.ts is
+unchanged — the four-value union is still what the calculator produces.
+
+### "CRITICAL" — SECOND PASS — 25 Sep 2026 — calculate.ts
+
+After the RingGrid standing gate, only General Surgery still read Critical.
+Cause: surgery clinical is a POSTING block (21–25 Sep). Past its end date there
+are no future unmarked sessions, so remainingWeight === 0, so
+isUnreachable(3, 5, 0, 80) returns true — best case 60% vs 80% threshold.
+
+Mathematically correct, semantically wrong. A finished posting block is not a
+finished term; it usually means the NEXT block has not been entered yet.
+
+FIX: targetUnreachable now requires remainingWeight > 0. With zero runway the
+band alone conveys severity ("Well behind"). "Critical" is reserved for: runway
+exists AND attending every remaining class still misses the threshold.
+
+⚠ SIDE EFFECT, ACCEPTED: at genuine term end every category has
+remainingWeight 0, so nothing will ever say Critical on the final day. If an
+end-of-term "finalised / below requirement" state is wanted later, add an
+explicit isFinalised flag driven by settings.term.endDate — do NOT revert this.
+
+### RING VISUALS — DONE 25 Sep 2026
+
+Silhouette fixed, verified in browser. Circular outline, neutral grey tracks,
+inset butt-cap notch, solid light track for empty rings, STROKE 13 / GAP 5.
+Tiles: no borders, soft elevation, two columns. Legend labels outer/inner.
+
+### "CRITICAL" — RESOLVED, NOT A BUG 25 Sep 2026
+
+After both fixes only General Surgery reads Critical, and it EARNS it:
+surgery/clinical 3/5 at an 80% threshold needs x ≥ 5 consecutive classes
+((3+x)/(5+x) ≥ 0.8). Fewer than 5 remain scheduled, so runway exists but is
+insufficient → targetUnreachable true → "Critical". Correct behaviour.
+
+ROOT CAUSE IS DATA, NOT CODE: only the current surgery posting block
+(21-25 Sep) is entered. Adding the next posting block restores runway and the
+label self-corrects to "Well behind". If no further surgery clinical sessions
+exist this term, 60% vs 80% is genuinely final and Critical is accurate.
+
+DO NOT soften targetUnreachable further to make this label go away.
