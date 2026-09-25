@@ -4,6 +4,7 @@
 // The calculator. Sessions in, numbers out.
 //
 // REBUILD v4 — see ATTENDANCE_REBUILD_SPEC.txt
+// PATCHED 25 Sep 2026 — SECTION 6 only. See "BUG 2" note in that section.
 //
 // ═════════════════════════════════════════════════════════════════════════════
 //  THE FIVE RULES THIS FILE EXISTS TO ENFORCE
@@ -409,10 +410,6 @@ export function computeCategory(input: CategoryInput): CategoryResult {
 //
 // ⚠ NO conducted, attended, percent or band on the subject itself. Those four
 //   fields existed in v3 and each one was a pooled number. See RULE 2.
-//
-// ⚠ TRAP 9 — only categories with real data appear. The curriculum says what
-//   is POSSIBLE; the timetable says what is REAL. A student who never entered
-//   an ENT practical must never see "ENT Practical — 0%".
 // -----------------------------------------------------------------------------
 
 const BAND_SEVERITY: Record<SafetyBand, number> = {
@@ -426,7 +423,8 @@ export function worstBandOf(categories: CategoryResult[]): SafetyBand {
   let worst: SafetyBand = 'safe';
   for (const c of categories) {
     // An excluded or empty category cannot drag the label down — there is
-    // nothing to be failing.
+    // nothing to be failing. This is what keeps a seeded 0/0 clinical ring
+    // from painting the whole subject Critical.
     if (c.isExcluded || c.isEmpty) continue;
     if (BAND_SEVERITY[c.band] > BAND_SEVERITY[worst]) worst = c.band;
   }
@@ -461,6 +459,51 @@ export function computeSubject(input: SubjectInput): SubjectResult {
 //
 // The pure entry point. Everything it needs is passed in; it reads nothing.
 // This is the function to unit-test — no store, no fixtures, no mocking.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  BUG 2 FIX — 25 Sep 2026. READ BEFORE CHANGING ANYTHING BELOW.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+//  WHAT WAS WRONG
+//    This function built its subject and category list by iterating the
+//    session buckets. A category with zero scheduled sessions therefore had
+//    no bucket, so it produced no CategoryResult, so it simply VANISHED from
+//    the output object.
+//
+//    Diagnostic evidence (debug page, section 2 and 5, after the term fix):
+//      medicine     legal: theory, clinical → returned: theory only
+//      paediatrics  legal: theory, clinical → returned: theory only
+//      obg          clinical had 13 future sessions → returned fine as 0/0
+//
+//    The OBG contrast is the proof: a category survived only if at least one
+//    session existed somewhere in the term.
+//
+//  WHY IT MATTERED
+//    The rings are concentric — outer theory, inner practical/clinical. With
+//    no clinical CategoryResult, the inner ring read `undefined`. Months were
+//    spent rewriting RingGrid.tsx chasing a bug that was never in RingGrid.
+//
+//  THE FIX
+//    The CURRICULUM decides which categories exist, not the timetable.
+//    Buckets are computed first (so nothing is computed twice), then every
+//    EXAM subject's remaining legal categories are filled with a real,
+//    honest 0/0 result.
+//
+//  ⚠ TRAP 9, NARROWED — NOT DELETED
+//    The old rule was "only categories with real data appear", to stop a
+//    student seeing "ENT Practical — 0%" for a practical they never had.
+//    That rule still holds for NON-EXAM subjects, which are tracked quietly
+//    in the background. It is deliberately suspended for EXAM subjects,
+//    because those own a fixed two-ring slot on the main page and a missing
+//    inner ring is worse than an empty one.
+//
+//  ⚠ AN EMPTY CATEGORY IS NOT 0%
+//    conducted === 0 sets isEmpty === true, which forces band 'safe',
+//    mustAttend 0, canSkip 0, targetUnreachable false, and makes
+//    worstBandOf() skip it entirely. statusLine() says "No classes recorded
+//    yet." and shortStatus() returns "—". Nothing-scheduled and zero-percent
+//    are different facts and the UI must never conflate them.
+// ═════════════════════════════════════════════════════════════════════════════
 // -----------------------------------------------------------------------------
 
 export interface YearInput {
@@ -502,66 +545,97 @@ export function computeYear(input: YearInput): YearResult {
 
   const today = input.today ?? todayISO();
   const buckets = bucketSessions(sessions);
-  const examSet = new Set(examSubjectIds ?? []);
+  const examIds = examSubjectIds ?? [];
+  const examSet = new Set(examIds);
 
-  // subjectId → its category results
-  const bySubject = new Map<SubjectId, CategoryResult[]>();
+  // ★ Nested map, keyed by category rather than a plain array.
+  //   This is what makes "compute once" structurally guaranteed: a category
+  //   that already has an entry can be detected with a single has() check,
+  //   so the gap-filling pass below can never recompute a populated bucket.
+  const bySubject = new Map<SubjectId, Map<ClassCategory, CategoryResult>>();
 
+  /** Local helper. Keeps the three passes below honest and identical. */
+  function put(
+    subjectId: SubjectId,
+    category: ClassCategory,
+    categorySessions: Session[],
+  ): void {
+    let categories = bySubject.get(subjectId);
+    if (!categories) {
+      categories = new Map<ClassCategory, CategoryResult>();
+      bySubject.set(subjectId, categories);
+    }
+
+    // Guard against double computation. Should be impossible given the pass
+    // order, but this is cheaper than trusting future edits to preserve it.
+    if (categories.has(category)) return;
+
+    categories.set(
+      category,
+      computeCategory({
+        category,
+        sessions: categorySessions,
+        threshold: resolveThreshold(subjectId, category),
+        isCustomThreshold: isCustomThreshold?.(subjectId, category) ?? false,
+        openingBalance: resolveOpeningBalance?.(subjectId, category) ?? null,
+        isExcluded: resolveExcluded?.(subjectId, category) ?? false,
+        today,
+        extraPolicy,
+      }),
+    );
+  }
+
+  // ---- PASS 1 — real sessions ------------------------------------------
+  // Everything that actually happened. Computed first so passes 2 and 3 can
+  // only ever ADD to the picture, never overwrite a real number with a zero.
   for (const bucket of buckets.values()) {
     const { subjectId, category } = bucket;
 
-    // ⚠ TRAP 9 — drop a category the curriculum says this subject cannot
-    //   have. A clinical subject has no practicals; data claiming otherwise
-    //   is corrupt, and showing it would confuse more than it informs.
+    // ⚠ Drop a category the curriculum says this subject cannot have. A
+    //   clinical subject has no practicals; data claiming otherwise is
+    //   corrupt, and rendering it would confuse more than it informs.
     if (!categoriesForSubject(subjectId).includes(category)) continue;
 
-    const result = computeCategory({
-      category,
-      sessions: bucket.sessions,
-      threshold: resolveThreshold(subjectId, category),
-      isCustomThreshold: isCustomThreshold?.(subjectId, category) ?? false,
-      openingBalance: resolveOpeningBalance?.(subjectId, category) ?? null,
-      isExcluded: resolveExcluded?.(subjectId, category) ?? false,
-      today,
-      extraPolicy,
-    });
-
-    const list = bySubject.get(subjectId) ?? [];
-    list.push(result);
-    bySubject.set(subjectId, list);
+    put(subjectId, category, bucket.sessions);
   }
 
-  // Also surface categories that have an opening balance but no sessions yet
-  // — a student who started mid-year and has not marked anything since must
-  // still see their carried-forward figures.
+  // ---- PASS 2 — complete every EXAM subject -----------------------------
+  // THE BUG 2 FIX. An exam subject owns a fixed outer/inner ring pair on the
+  // main page, so both legal categories must exist even with nothing in them.
+  // A subject with no sessions at all is created here from scratch — which is
+  // why a configured exam subject can no longer disappear entirely.
+  for (const subjectId of examIds) {
+    for (const category of categoriesForSubject(subjectId)) {
+      // put() no-ops if pass 1 already filled this. Empty array → honest 0/0,
+      // with any opening balance still applied inside computeCategory().
+      put(subjectId, category, []);
+    }
+  }
+
+  // ---- PASS 3 — opening balances on NON-EXAM subjects -------------------
+  // A student who transferred mid-year may have carried-forward figures for a
+  // subject they have not scheduled yet. Exam subjects are already complete
+  // after pass 2, so this only reaches the quietly-tracked ones.
+  //
+  // TRAP 9 still applies here: no balance, no row. A non-exam subject must
+  // not sprout an empty category just because the curriculum permits one.
   if (resolveOpeningBalance) {
-    for (const subjectId of bySubject.keys()) {
-      const have = new Set(bySubject.get(subjectId)!.map((c) => c.category));
+    for (const subjectId of [...bySubject.keys()]) {
+      if (examSet.has(subjectId)) continue;
 
       for (const category of categoriesForSubject(subjectId)) {
-        if (have.has(category)) continue;
+        if (bySubject.get(subjectId)!.has(category)) continue;
 
         const ob = resolveOpeningBalance(subjectId, category);
         if (!ob || ob.conducted <= 0) continue;
 
-        bySubject.get(subjectId)!.push(
-          computeCategory({
-            category,
-            sessions: [],
-            threshold: resolveThreshold(subjectId, category),
-            isCustomThreshold: isCustomThreshold?.(subjectId, category) ?? false,
-            openingBalance: ob,
-            isExcluded: resolveExcluded?.(subjectId, category) ?? false,
-            today,
-            extraPolicy,
-          }),
-        );
+        put(subjectId, category, []);
       }
     }
   }
 
   // Stable display order: theory always before practical/clinical, matching
-  // the outer/inner ring pairing.
+  // the outer/inner ring pairing. RingGrid relies on index 0 being theory.
   const ORDER: ClassCategory[] = ['theory', 'practical', 'clinical'];
 
   const subjects: SubjectResult[] = [...bySubject.entries()]
@@ -569,7 +643,7 @@ export function computeYear(input: YearInput): YearResult {
       computeSubject({
         subjectId,
         academicYear,
-        categories: categories.sort(
+        categories: [...categories.values()].sort(
           (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category),
         ),
         isExamSubject: examSet.has(subjectId),

@@ -1,0 +1,273 @@
+warning: in the working copy of 'MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/MEMORY.md b/MEMORY.md[m
+[1mindex a249c81..586d57f 100644[m
+[1m--- a/MEMORY.md[m
+[1m+++ b/MEMORY.md[m
+[36m@@ -4,15 +4,22 @@[m
+ If your stored memory contradicts this file, your memory is wrong.[m
+ If this file contradicts `tree app /F`, the disk is right — update this file.[m
+ Never assume a feature is unbuilt. Check first.[m
+[32m+[m[32mNever assume a bug is fixed. Check the files on disk, then the browser.[m
+ [m
+ Repo: https://github.com/Abhidatla203/medprep[m
+ Path: C:\Users\abhid\Desktop\medprep[m
+ Owner: Abhidatla203[m
+ [m
+[31m-**IGNORE THESE FILES.** They are stale or were never real:[m
+[31m-- `ATTENDANCE_REBUILD_PROGRESS.md` — never existed on disk. Phantom.[m
+[31m-- `ATTENDANCE_REBUILD_V2.md` — scratch file, now in .gitignore.[m
+[31m-- `ATTENDANCE_REBUILD_SPEC.txt` — superseded by sections 10–15 of this file.[m
+[32m+[m[32m**Last updated:** 24 September 2026[m
+[32m+[m[32m**Project status:** PAUSED. BUG FIXING ONLY. Do not start the next feature.[m
+[32m+[m
+[32m+[m[32m**IGNORE / DO NOT TREAT AS CURRENT TRUTH:**[m
+[32m+[m[32m- `ATTENDANCE_REBUILD_V2.md` — scratch file, gitignored.[m
+[32m+[m[32m- `ATTENDANCE_REBUILD_SPEC.txt` — design intent only. Where it conflicts with this file or disk, disk + this file win.[m
+[32m+[m[32m- Chat history and earlier MEMORY copies that say “RingGrid is NEXT” or “page.tsx is a stopgap”. That is stale. Those files were written later.[m
+[32m+[m[32m- Chat history that says “all 8 steps done, shakedown only, 0 tsc errors”. Construction was attempted. **Verification failed.** Compiler state after the last replacements is **unconfirmed**.[m
+[32m+[m
+[32m+[m[32mIf `ATTENDANCE_REBUILD_PROGRESS.md` exists on disk, it is a session handoff note. This MEMORY.md is the standing project file. Keep them aligned.[m
+ [m
+ ---[m
+ [m
+[36m@@ -22,7 +29,7 @@[m [mOwner: Abhidatla203[m
+ - Slower pace. Less detail per message. Too much at once is hard to process.[m
+ - **FULL REPLACEMENT FILES ONLY.** Never "find line 40 and change it".[m
+   Partial edits have broken this project repeatedly. No exceptions.[m
+[31m-- One file at a time. One feature at a time.[m
+[32m+[m[32m- One file at a time. One feature at a time. **Right now: one bug at a time.**[m
+ - Exact copy-paste PowerShell commands, tailored to the real folder structure.[m
+ - Before the code: a short table of what's changing and why.[m
+ - Heavy inline comments in the code explaining the REASONING, not the mechanics.[m
+[36m@@ -30,6 +37,7 @@[m [mOwner: Abhidatla203[m
+ - If you need an existing file, ASK. Do not guess at export names.[m
+ - No back-and-forth clarification loops. Ask at most one question, up front.[m
+ - Brainstorming: I give my vision → you suggest changes → I assess and reply.[m
+[32m+[m[32m- **Do not rewrite RingGrid again until the data path is proven.** Several ring rewrites already chased a rendering bug that may live in store/generate/cache.[m
+ [m
+ ---[m
+ [m
+[36m@@ -43,29 +51,38 @@[m [mOwner: Abhidatla203[m
+ - Design principle: **store raw facts, compute views at read time.**[m
+   Nothing derived is ever persisted. That is what makes stale numbers impossible.[m
+ [m
+[32m+[m[32m**Tailwind v4 hard rule:** never write `bg-[--color-safe]`. That generates **nothing**.[m
+[32m+[m[32mUse real theme utilities (`bg-safe`) or explicit inline colours. This caused Present[m
+[32m+[m[32mbuttons to go blank (white text on white).[m
+[32m+[m
+ ---[m
+ [m
+ ## 3. ATTENDANCE REBUILD — BUILD STATUS[m
+ [m
+[31m-Verified by `npx tsc --noEmit` returning **zero errors**.[m
+[32m+[m[32mFiles were written and wired. **The product is not done.** Marks do not reliably[m
+[32m+[m[32mdrive the rings. Do not treat “file exists” as “feature works”.[m
+ [m
+ | # | File | State |[m
+ |---|------|-------|[m
+[31m-| 1 | `app/attendance/types.ts` | DONE — v4 |[m
+[31m-| 2 | `app/attendance/calculate.ts` | DONE — v4 |[m
+[31m-| 3 | `app/attendance/store.ts` | DONE — v4 |[m
+[31m-| 4 | `app/attendance/generate.ts` | DONE — v4 |[m
+[31m-| 5 | `app/globals.css` | DONE — tile + ring tokens added |[m
+[31m-| 6 | `app/attendance/components/WeekStrip.tsx` | DONE |[m
+[31m-| 7 | `app/attendance/components/MarkList.tsx` | DONE |[m
+[31m-| 8 | `app/attendance/components/RingGrid.tsx` | **NEXT** |[m
+[31m-| 9 | `app/attendance/page.tsx` | TEMPORARY STOPGAP — rewrite last |[m
+[31m-[m
+[31m-`page.tsx` currently renders plain Tailwind with no design tokens. It exists[m
+[31m-only so the dev server compiles. It is NOT the real page.[m
+[31m-[m
+[31m-Error-count history, for detecting regressions:[m
+[31m-45 → 5 → 42 → 21 → 18 → 0[m
+[32m+[m[32m| 1 | `app/attendance/types.ts` | WRITTEN — inspect on disk before changing |[m
+[32m+[m[32m| 2 | `app/attendance/calculate.ts` | WRITTEN — core present/absent maths looked correct on review. **Not proven against live marks.** |[m
+[32m+[m[32m| 3 | `app/attendance/store.ts` | WRITTEN — **PRIME SUSPECT. Not inspected/fixed after the ring mismatch.** |[m
+[32m+[m[32m| 4 | `app/attendance/generate.ts` | WRITTEN — **PRIME SUSPECT. Not inspected/fixed after the ring mismatch.** |[m
+[32m+[m[32m| 5 | `app/globals.css` | WRITTEN — tiles, modal, darker ring-track. Token usage still a trap |[m
+[32m+[m[32m| 6 | `app/attendance/components/WeekStrip.tsx` | WRITTEN — days as rows, time across, segment widths, am/pm, type stripe. **Verify on disk; some pastes were truncated.** |[m
+[32m+[m[32m| 7 | `app/attendance/components/MarkList.tsx` | WRITTEN — colour-coded P/A/C; Tailwind bracket bug addressed in the supplied file |[m
+[32m+[m[32m| 8 | `app/attendance/components/RingGrid.tsx` | WRITTEN — modal, hard-coded colours, geometry from attended/conducted. **Still not matching marked data in screenshots.** |[m
+[32m+[m[32m| 9 | `app/attendance/page.tsx` | REAL PAGE — WeekStrip + MarkList + RingGrid. Hydration gate. Page-scoped `runMigrations()`. No “other subjects” dropdown. Helper copy removed. |[m
+[32m+[m
+[32m+[m[32m`app/attendance/debug/page.tsx` — **NOT CREATED.** Proposed. Required next.[m
+[32m+[m
+[32m+[m[32m**TypeScript:** last confirmed `npx tsc --noEmit` in an older session was 0 errors.[m
+[32m+[m[32mAfter later RingGrid/WeekStrip/page replacements, compile was **not confirmed**.[m
+[32m+[m[32mA `SubjectModal` missing-name error appeared; a full RingGrid was then supplied.[m
+[32m+[m[32m**Run tsc again before trusting anything.**[m
+[32m+[m
+[32m+[m[32mError-count history (older session only): 45 → 5 → 42 → 21 → 18 → 0[m
+[32m+[m[32mDo not reuse “0 errors” as current fact until a fresh compile is pasted.[m
+ [m
+ ---[m
+ [m
+[36m@@ -76,8 +93,10 @@[m [mEvery one of these exists because the v3 code got it wrong.[m
+ 1. **EXACT RATIO FOR EVERY DECISION.**[m
+    v3 rounded to one decimal, then compared. 74.96% became 75.0, scored "safe",[m
+    and reported zero classes needed — to a student below the line.[m
+[31m-   `ratio` is the unrounded fraction and is the only thing compared.[m
+[32m+[m[32m   `ratio` is the unrounded fraction and is the only thing compared **in calculate.ts**.[m
+    `percentDisplay` exists solely to be printed.[m
+[32m+[m[32m   **Ring SVG must use `attended / conducted`, never `ratio` or `percentDisplay`.**[m
+[32m+[m[32m   Do not assume `ratio` is 0–1 or 0–100 without reading `types.ts` + `calculate.ts` on disk.[m
+ [m
+ 2. **NO POOLED NUMBERS.**[m
+    No overall percentage. No subject percentage. No year percentage.[m
+[36m@@ -97,6 +116,7 @@[m [mEvery one of these exists because the v3 code got it wrong.[m
+ 5. **ONE PASS.**[m
+    Sessions bucketed by `subjectId::category` in a single traversal.[m
+    Both `calculate.ts` and `generate.ts` memoise on `DataVersion`.[m
+[32m+[m[32m   **If `setMark()` does not bump DataVersion, the year cache returns stale results forever.**[m
+ [m
+ ---[m
+ [m
+[36m@@ -106,12 +126,17 @@[m [mEvery one of these exists because the v3 code got it wrong.[m
+ present        → attended += weight,  conducted += weight[m
+ absent         → attended += 0,       conducted += weight[m
+ not-conducted  → nothing. 0/0. Leaves both sides. UI label: "Cancelled"[m
+[31m-unmarked       → nothing. Counted only for the "N unmarked" nag.[m
+[32m+[m[32munmarked       → currently excluded from the denominator (counted only for "N unmarked")[m
+ ```[m
+ [m
+ Stored value stays `'not-conducted'`. The UI says "Cancelled". Renaming the[m
+ stored value would orphan every existing mark for zero benefit.[m
+ [m
+[32m+[m[32m**Unmarked policy is a product decision, not an accident.** Past unmarked classes[m
+[32m+[m[32mcurrently do **not** count as conducted. So Present + Present + Unmarked + Unmarked[m
+[32m+[m[32m= 2/2 = 100%. If the UI implies otherwise, that is a bug. Decide and document[m
+[32m+[m[32mbefore changing the unmarked branch.[m
+[32m+[m
+ ---[m
+ [m
+ ## 6. WHAT v4 CHANGED FROM v3[m
+[36m@@ -135,23 +160,74 @@[m [menforced by the type system, not by carefulness.[m
+ [m
+ ---[m
+ [m
+[31m-## 7. OUTSTANDING WORK[m
+[32m+[m[32m## 7. CURRENT PHASE — FIX BUGS BEFORE ANY NEXT FEATURE[m
+[32m+[m
+[32m+[m[32m**HARD STOP.** No new feature. No app-wide makeover. No RingGrid “improvements”.[m
+[32m+[m[32mNo settings redesign. No relocating migrations to root layout unless required[m
+[32m+[m[32mto diagnose a live bug.[m
+[32m+[m
+[32m+[m[32mThe requirement that is failing:[m
+ [m
+[31m-### HIGH — data loss risk[m
+[31m-**`runMigrations()` is never called.** It exists in `store.ts` and is correct,[m
+[31m-but nothing invokes it. Any existing v3 user silently resets to defaults on[m
+[31m-first load. Needs a top-level client effect — NOT in a page component that can[m
+[31m-remount.[m
+[32m+[m[32m> Marks made in the UI must drive generated sessions, calculated percentages,[m
+[32m+[m[32m> week tiles, and rings.[m
+ [m
+[31m-### MEDIUM[m
+[31m-- `page.tsx` is a stopgap. Rewrite after RingGrid.[m
+[31m-- `useAttendance.ts` — not audited this session. May reference deleted v3 API.[m
+[32m+[m[32mUntil that is true in the browser, nothing else matters.[m
+[32m+[m
+[32m+[m[32m### BLOCKING — rings / marks mismatch[m
+[32m+[m
+[32m+[m[32mObserved: mock Present/Absent marks in MarkList did not match RingGrid.[m
+[32m+[m[32mSome rings looked fully Safe. Another subject looked like “no classes”[m
+[32m+[m[32m(dashed empty ring) while labelled Critical. Practical rings were missing[m
+[32m+[m[32mor not obvious.[m
+[32m+[m
+[32m+[m[32m`calculate.ts` present/absent arithmetic looked correct on paper:[m
+[32m+[m
+[32m+[m[32m```[m
+[32m+[m[32mpresent  → attended += w; conducted += w[m
+[32m+[m[32mabsent   → conducted += w[m
+[32m+[m[32mcancelled → neither[m
+[32m+[m[32munmarked → neither (until marked)[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mSo a full ring with mixed marks means the ring is drawing bad inputs, **or**[m
+[32m+[m[32mthe sessions never carried the absent marks.[m
+[32m+[m
+[32m+[m[32mLikely causes, in order. Fix the earliest broken layer:[m
+[32m+[m
+[32m+[m[32m1. `setMark()` does not persist, or uses a different id than generate[m
+[32m+[m[32m2. `setMark()` does not increment `DataVersion`[m
+[32m+[m[32m3. `setMark()` does not notify subscribers[m
+[32m+[m[32m4. `generate.ts` does not attach stored status to the same id[m
+[32m+[m[32m5. year cache in `calculate.ts` returns a stale `YearResult`[m
+[32m+[m[32m6. category grouping does not match generated `session.category`[m
+[32m+[m[32m7. only then: RingGrid reading the wrong fields[m
+[32m+[m
+[32m+[m[32m**Do not rewrite RingGrid until a session table proves the result object is wrong.**[m
+[32m+[m
+[32m+[m[32m### NOT DONE — last proposed debug work[m
+[32m+[m
+[32m+[m[32mThese were requested and **not implemented**:[m
+[32m+[m
+[32m+[m[32m1. Inspect real files on disk (do not trust chat pastes).[m
+[32m+[m[32m2. Fresh `npx tsc --noEmit`.[m
+[32m+[m[32m3. Temporary `app/attendance/debug/page.tsx` — independent session tally vs `getYearResult()`.[m
+[32m+[m[32m4. Console log of generated sessions + DataVersion + calculated result after one Present and one Absent.[m
+[32m+[m[32m5. Trace one mark: click → localStorage key → generate status → calculate → ring.[m
+[32m+[m[32m6. Open and fix `store.ts` / `generate.ts` if that trace fails.[m
+[32m+[m
+[32m+[m[32m### MEDIUM — after bugs are closed[m
+[32m+[m
+[32m+[m[32m- `runMigrations()` is now called in `app/attendance/page.tsx` before `setMounted(true)`, with a StrictMode ref guard. Still **page-scoped**. First visit to `/settings` or `/attendance/setup` can read pre-migration data. Proper home: root layout client effect. Do with the Turbopack font issue in `layout.tsx`.[m
+[32m+[m[32m- `useAttendance.ts` — not audited. May reference deleted v3 API.[m
+ - `app/settings/attendance/page.tsx` — may still read `targetPercent`.[m
+[32m+[m[32m- Thresholds belong in SETTINGS, not setup. Settings UI may still lack that.[m
+ [m
+[31m-### LOW[m
+[31m-- `extraPolicy` fallback in `calculate.ts` SECTION 3 is now dead code.[m
+[31m-  `generate.ts` sets the flag properly. Delete after real-data verification.[m
+[31m-- `datetime.ts` has a comment referencing `DateField` — cosmetic only.[m
+[32m+[m[32m### LOW — after bugs are closed[m
+[32m+[m
+[32m+[m[32m- `extraPolicy` fallback in `calculate.ts` may be dead. Delete after real-data verification.[m
+[32m+[m[32m- `datetime.ts` comment referencing `DateField` — cosmetic.[m
+[32m+[m[32m- `subjectShort()` codes are 4–6 chars; may truncate in week cells.[m
+[32m+[m[32m- Two component folders, two store patterns, two attendance settings screens — known issues, not this phase.[m
+ [m
+ ---[m
+ [m
+[36m@@ -169,12 +245,22 @@[m [mexist, and the chip renders unstyled. Map it explicitly, in one place.[m
+ [m
+ **2. `--color-practical` is the SAME GREEN as `--color-safe` (#0f9b6c).**[m
+ [m
+[31m-Fine on the ring grid, where colour means CATEGORY.[m
+ Fatal on the week strip, where green means PRESENT — a practical tile would[m
+ read as "attended" purely by being a practical.[m
+ [m
+[31m-**Rule: the week strip uses STATUS colour only.** Category is carried by the[m
+[31m-subject short code, never by hue.[m
+[32m+[m[32m**Rule: the week strip uses STATUS colour for the fill only.**[m
+[32m+[m[32mClass type is a stripe + letter (T / P / C), not the fill hue.[m
+[32m+[m
+[32m+[m[32mIntended type colours (hard-coded in RingGrid and WeekStrip on purpose,[m
+[32m+[m[32mbecause CSS classes failed silently):[m
+[32m+[m
+[32m+[m[32m```[m
+[32m+[m[32mtheory    arc #7c3aed  track #cfc7dd[m
+[32m+[m[32mpractical arc #ea580c  track #e6d9cd[m
+[32m+[m[32mclinical  arc #0891b2  track #c9dbe0[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mDo not “fix” these back into `@theme` until the UI is verified.[m
+ [m
+ ---[m
+ [m
+[36m@@ -190,17 +276,21 @@[m [mremoved deliberately.[m
+ `--color-brand-hover`, `--color-brand-soft`, `--color-brand-line`,[m
+ `--color-brand-ink`, `--color-safe/-soft/-line`, `--color-watch/-soft/-line`,[m
+ `--color-risk/-soft/-line`, `--color-critical/-soft/-line`, `--color-theory`,[m
+[31m-`--color-practical`, `--color-clinical`, `--color-ring-track`,[m
+[31m-`--radius-card/-field/-sheet/-pill`[m
+[32m+[m[32m`--color-practical`, `--color-clinical`, `--color-ring-track`, `--color-ring-empty`,[m
+[32m+[m[32m`--radius-card/-field/-sheet/-modal/-pill`[m
+ [m
+ **Classes:** `.card`, `.card-interactive`, `.display`, `.eyebrow`, `.tnum`,[m
+ `.btn` + `-primary/-ghost/-quiet/-danger`, `.field`, `.field-select`, `.seg`,[m
+ `.seg-on`, `.chip` + `-brand/-safe/-watch/-risk/-critical/-neutral`, `.sheet`[m
+[31m-+ `-head/-body/-foot/-grip/-scrim`, `.tile` + `-present/-absent/-unmarked/`[m
+[32m+[m[32m+ `-head/-body/-foot/-grip/-scrim`, `.modal-layer`, `.modal-scrim`, `.modal-card`,[m
+[32m+[m[32m`.modal-head`, `.modal-body`, `.modal-close`, `.tile` + `-present/-absent/-unmarked/`[m
+ `-future/-cancelled/-offgrid`, `.day-today`
