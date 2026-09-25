@@ -760,3 +760,97 @@ label self-corrects to "Well behind". If no further surgery clinical sessions
 exist this term, 60% vs 80% is genuinely final and Critical is accurate.
 
 DO NOT soften targetUnreachable further to make this label go away.
+
+### BUG 1 — PERMANENTLY FIXED 25 Sep 2026 — new file setup/TermPanel.tsx
+
+The term is now settable in the UI. Previously NOTHING in app/ or lib/ ever
+wrote settings.term — every reference was a read, a default (store.ts:278,
+307-308, both todayISO()), or a legacy migration. The only value that had ever
+existed on a real device was a ONE-DAY TERM, which silently starved
+generateForYear() and caused every symptom chased this session.
+
+TermPanel sits under HoursCard in setup. Warns on: one-day term, span under 14
+days, end before start, today before start, today after end. Warnings name the
+CONSEQUENCE ("anything you mark outside this range will not reach your rings"),
+not the rule.
+
+⚠ Uses LOCAL DRAFT STATE + commit on blur, unlike the rest of setup which
+writes immediately. A date input fires onChange per keystroke; typing a year
+would write 0002/0020/0202/2027, bumping DataVersion and regenerating the term
+four times. Draft state is the deliberate exception, not an oversight.
+
+LESSON RECORDED: a required setting with a plausible default and no UI is worse
+than one with no default. A missing value announces itself; a default of
+`today` poisons every downstream calculation while looking reasonable in the
+debugger.
+
+REMAINING QUEUE:
+
+1. WeekStrip: start/end times inside tiles, remove break duration labels
+2. WeekStrip: prev/next week navigation + date jump + "This week"
+3. Delete debug route once the test matrix passes
+
+### WEEKSTRIP — TILE TIMES + WEEK NAVIGATION — 25 Sep 2026
+
+TILE TIMES: each class tile now shows its own start (left) and end (right) at
+0.5rem, with code + T/P/C centred above. Grid floor raised 2.75rem → 4.5rem —
+two timestamps do not fit
+
+### WEEKSTRIP — TILE TIMES + WEEK NAVIGATION — 25 Sep 2026
+
+TILE TIMES: each class tile now shows its own start (left) and end (right) at
+0.5rem, with code + T/P/C centred above. Grid floor raised 2.75rem to 4.5rem —
+two timestamps do not fit in 44px at a legible size. Cost: the strip scrolls
+sideways more often. Correct trade on a phone, where swiping is free and
+squinting is not.
+
+BREAK DURATION LABELS REMOVED from the time header. Redundant once every tile
+states its own end: the gap between one tile's end and the next tile's start
+IS the break, already stated twice. The dashed divider still marks it.
+
+NAVIGATION: prev/next week, "Today" (rendered only when not on the current
+week — a permanently visible Today button does nothing most of the time), and
+a date jump implemented as a transparent input type=date over the range label,
+so a phone opens the OS wheel instead of a hand-built HTML calendar.
+
+SWIPE, AND THE GESTURE CONFLICT. The strip is already a horizontal scroller —
+that is the point of days-as-rows. A swipe handler over a horizontal scroller
+fights it and the user loses. RESOLVED: the week gesture only ARMS at a
+scroller edge. scrollLeft 0 + rightward drag = previous week; scrollLeft max +
+leftward drag = next week; anywhere between, native scroll is untouched. Two
+extra filters: the drag must be mostly horizontal (dx > dy) so vertical page
+scrolling never changes week, and it must clear 56px so a wobbly tap does
+nothing. touchAction pan-y keeps vertical scrolling native.
+
+STATE: localAnchor is a FALLBACK, not a second owner. page.tsx still owns
+selectedDate; navigating always calls onSelectDay. localAnchor only covers the
+case where a parent does not feed the date back through anchorDate — without
+it the strip would navigate then snap back, which reads as a broken button. It
+is cleared by an effect on parentAnchor, so a controlled parent always wins.
+
+OUTSIDE-TERM WARNING added, unprompted but necessary now that TermPanel makes
+the term real and settable. Navigating past the term edges shows an amber note:
+marks made out there are saved but never reach the rings. Silently rendering a
+normal grid is exactly the deception that cost this project weeks.
+
+npx tsc --noEmit clean.
+
+QUEUE ITEMS 1 AND 2 CLOSED. Remaining: delete app/attendance/debug/page.tsx
+once the section 15 matrix passes.
+
+### WEEKSTRIP — LONG PRESS + PINNED COMPACT CARD — 25 Sep 2026
+
+Compact strip is pinned to THIS week. Overlay owns browseAnchor and throws
+it away on close. They never share an anchor.
+
+Long-press (450ms, 10px) expands into a blurred overlay. Swipe lives only
+there: follows the finger, glides past 56px, incoming week enters from the
+opposite side. Compact card has no arrows.
+
+Times live on the rail, not on every tile. Start at the left edge of a
+class column; end only after a gap or on the last column.
+
+tsc clean. ESLint/React Compiler clean (hooks ordered, hint via
+useSyncExternalStore). Matrix rounds 1–5 PASSED.
+
+QUEUE CLOSED. Debug route deleted after matrix pass.

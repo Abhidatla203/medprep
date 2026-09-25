@@ -14,6 +14,7 @@ Owner: Abhidatla203
 **Project status:** PAUSED. BUG FIXING ONLY. Do not start the next feature.
 
 **IGNORE / DO NOT TREAT AS CURRENT TRUTH:**
+
 - `ATTENDANCE_REBUILD_V2.md` — scratch file, gitignored.
 - `ATTENDANCE_REBUILD_SPEC.txt` — design intent only. Where it conflicts with this file or disk, disk + this file win.
 - Chat history and earlier MEMORY copies that say “RingGrid is NEXT” or “page.tsx is a stopgap”. That is stale. Those files were written later.
@@ -62,17 +63,17 @@ buttons to go blank (white text on white).
 Files were written and wired. **The product is not done.** Marks do not reliably
 drive the rings. Do not treat “file exists” as “feature works”.
 
-| # | File | State |
-|---|------|-------|
-| 1 | `app/attendance/types.ts` | WRITTEN — inspect on disk before changing |
-| 2 | `app/attendance/calculate.ts` | WRITTEN — core present/absent maths looked correct on review. **Not proven against live marks.** |
-| 3 | `app/attendance/store.ts` | WRITTEN — **PRIME SUSPECT. Not inspected/fixed after the ring mismatch.** |
-| 4 | `app/attendance/generate.ts` | WRITTEN — **PRIME SUSPECT. Not inspected/fixed after the ring mismatch.** |
-| 5 | `app/globals.css` | WRITTEN — tiles, modal, darker ring-track. Token usage still a trap |
-| 6 | `app/attendance/components/WeekStrip.tsx` | WRITTEN — days as rows, time across, segment widths, am/pm, type stripe. **Verify on disk; some pastes were truncated.** |
-| 7 | `app/attendance/components/MarkList.tsx` | WRITTEN — colour-coded P/A/C; Tailwind bracket bug addressed in the supplied file |
-| 8 | `app/attendance/components/RingGrid.tsx` | WRITTEN — modal, hard-coded colours, geometry from attended/conducted. **Still not matching marked data in screenshots.** |
-| 9 | `app/attendance/page.tsx` | REAL PAGE — WeekStrip + MarkList + RingGrid. Hydration gate. Page-scoped `runMigrations()`. No “other subjects” dropdown. Helper copy removed. |
+| #   | File                                      | State                                                                                                                                          |
+| --- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `app/attendance/types.ts`                 | WRITTEN — inspect on disk before changing                                                                                                      |
+| 2   | `app/attendance/calculate.ts`             | WRITTEN — core present/absent maths looked correct on review. **Not proven against live marks.**                                               |
+| 3   | `app/attendance/store.ts`                 | WRITTEN — **PRIME SUSPECT. Not inspected/fixed after the ring mismatch.**                                                                      |
+| 4   | `app/attendance/generate.ts`              | WRITTEN — **PRIME SUSPECT. Not inspected/fixed after the ring mismatch.**                                                                      |
+| 5   | `app/globals.css`                         | WRITTEN — tiles, modal, darker ring-track. Token usage still a trap                                                                            |
+| 6   | `app/attendance/components/WeekStrip.tsx` | WRITTEN — days as rows, time across, segment widths, am/pm, type stripe. **Verify on disk; some pastes were truncated.**                       |
+| 7   | `app/attendance/components/MarkList.tsx`  | WRITTEN — colour-coded P/A/C; Tailwind bracket bug addressed in the supplied file                                                              |
+| 8   | `app/attendance/components/RingGrid.tsx`  | WRITTEN — modal, hard-coded colours, geometry from attended/conducted. **Still not matching marked data in screenshots.**                      |
+| 9   | `app/attendance/page.tsx`                 | REAL PAGE — WeekStrip + MarkList + RingGrid. Hydration gate. Page-scoped `runMigrations()`. No “other subjects” dropdown. Helper copy removed. |
 
 `app/attendance/debug/page.tsx` — **NOT CREATED.** Proposed. Required next.
 
@@ -141,21 +142,21 @@ before changing the unmarked branch.
 
 ## 6. WHAT v4 CHANGED FROM v3
 
-| Change | Why |
-|---|---|
+| Change                                         | Why                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------- |
 | `ExtraClass.countsTowardDenominator` per entry | Was one global setting that swept through regular classes too |
-| `settings.term.targetPercent` DELETED | One number cannot express 75% theory / 80% practical |
-| `settings.extraClassPolicy` DELETED | Now per-entry |
-| New `ThresholdStore` | Sparse, per year/subject/category |
-| `DataVersion` counter | Memo key for both caches |
-| TRAP 8 exclusion lock REMOVED | Exclusion deletes nothing and reverses instantly |
-| Blockouts outrank stale `absent` marks | A class that didn't happen cannot be an absence |
-| Regular sessions filtered by `workingDays` | A 6-day college was generating Sunday classes |
-| Backup preserves entry ids | Old importer minted fresh ids, orphaning every mark |
+| `settings.term.targetPercent` DELETED          | One number cannot express 75% theory / 80% practical          |
+| `settings.extraClassPolicy` DELETED            | Now per-entry                                                 |
+| New `ThresholdStore`                           | Sparse, per year/subject/category                             |
+| `DataVersion` counter                          | Memo key for both caches                                      |
+| TRAP 8 exclusion lock REMOVED                  | Exclusion deletes nothing and reverses instantly              |
+| Blockouts outrank stale `absent` marks         | A class that didn't happen cannot be an absence               |
+| Regular sessions filtered by `workingDays`     | A 6-day college was generating Sunday classes                 |
+| Backup preserves entry ids                     | Old importer minted fresh ids, orphaning every mark           |
 
 **The structural safety mechanism:** extra sessions HAVE
 `countsTowardDenominator`. Regular and posting sessions leave it `undefined`.
-Recalculating extras is therefore *incapable* of reaching a scheduled class —
+Recalculating extras is therefore _incapable_ of reaching a scheduled class —
 enforced by the type system, not by carefulness.
 
 ---
@@ -282,11 +283,12 @@ removed deliberately.
 **Classes:** `.card`, `.card-interactive`, `.display`, `.eyebrow`, `.tnum`,
 `.btn` + `-primary/-ghost/-quiet/-danger`, `.field`, `.field-select`, `.seg`,
 `.seg-on`, `.chip` + `-brand/-safe/-watch/-risk/-critical/-neutral`, `.sheet`
-+ `-head/-body/-foot/-grip/-scrim`, `.modal-layer`, `.modal-scrim`, `.modal-card`,
-`.modal-head`, `.modal-body`, `.modal-close`, `.tile` + `-present/-absent/-unmarked/`
-`-future/-cancelled/-offgrid`, `.day-today`, `.break-row`, `.ring-track`,
-`.ring-empty`, `.ring-arc`, `.ring-theory/-practical/-clinical`, `.ring-tick`,
-`.ring-label-*`, `.aurora`, `.animate-rise`
+
+- `-head/-body/-foot/-grip/-scrim`, `.modal-layer`, `.modal-scrim`, `.modal-card`,
+  `.modal-head`, `.modal-body`, `.modal-close`, `.tile` + `-present/-absent/-unmarked/`
+  `-future/-cancelled/-offgrid`, `.day-today`, `.break-row`, `.ring-track`,
+  `.ring-empty`, `.ring-arc`, `.ring-theory/-practical/-clinical`, `.ring-tick`,
+  `.ring-label-*`, `.aurora`, `.animate-rise`
 
 **Modal:** centred, blurred scrim, spring scale, Escape, scrim tap, body
 `data-modal-open="true"` locks scroll.
@@ -301,6 +303,7 @@ The footer is a SIBLING of the scroll area, never a sticky child of it.
 ## 10. UI RULES BY COMPONENT
 
 ### Week strip
+
 - READ-ONLY. Renders sessions, computes nothing. Marking happens below.
 - NO PERCENTAGES. Ever. Its job is "have I logged everything?", not "am I safe?".
 - **ROWS = days. COLUMNS = time.** Matches printed college timetables. Overflow
@@ -316,6 +319,7 @@ The footer is a SIBLING of the scroll area, never a sticky child of it.
 - Tile segment count equals weight. A posting counted as 3 draws 3 segments.
 
 ### Mark list
+
 - ONE ROW PER SESSION whatever the weight. One tap. "counts as 3" chip shown
   only when weight > 1.
 - Cancelled button is SMALLER than Present/Absent.
@@ -327,6 +331,7 @@ The footer is a SIBLING of the scroll area, never a sticky child of it.
   No Cancelled option on quick add.
 
 ### Ring grid
+
 - One ring per REAL category the subject has. Theory outermost.
   Do not assume a theory+practical pair. That dropped real data.
 - Fuller coloured arc = higher `attended / conducted`. Grey track = remainder.
@@ -339,6 +344,7 @@ The footer is a SIBLING of the scroll area, never a sticky child of it.
 - No helper paragraph under “Where you stand”. Category dots are enough.
 
 ### Page
+
 - Owns `selectedDate`. Strip and list stay in sync.
 - Mount gate: no store reads until after first client pass + migrations.
 - This year’s exam subjects in the main grid. **No other-subjects dropdown.**
@@ -346,7 +352,7 @@ The footer is a SIBLING of the scroll area, never a sticky child of it.
 
 ---
 
-## 11. THE TEN TRAPS  (+ session traps)
+## 11. THE TEN TRAPS (+ session traps)
 
 1. **Category from the slot, never from history.** A posting replaced by a
    theory class produces a THEORY session.
@@ -362,6 +368,7 @@ The footer is a SIBLING of the scroll area, never a sticky child of it.
 10. **Opening balance REPLACES, never adds.**
 
 **Plus:**
+
 - Session ids must be DETERMINISTIC — `s_reg_{entryId}_{date}` (and the extra
   equivalent). No `Date.now()`, no `Math.random()`. Marks are keyed by session id.
 - **Tailwind v4 `bg-[--color-*]` is dead.** Use `bg-safe` or inline styles.
@@ -387,7 +394,7 @@ Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
   ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 ```
 
-**PowerShell `**` is NOT recursive.** Use `Get-ChildItem -Recurse`.
+**PowerShell `**`is NOT recursive.** Use`Get-ChildItem -Recurse`.
 
 ---
 
@@ -420,26 +427,26 @@ Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
 
 ## 15. TESTING MATRIX — must pass before any next feature
 
-| Test | Expected | Status |
-|---|---|---|
-| Present click | Row, week tile, ring update | NOT VERIFIED |
-| Absent click | Row, week tile, ring update | NOT VERIFIED |
-| Cancelled click | Row, week tile, ring update | NOT VERIFIED |
-| Repeat active mark | Returns to unmarked | NOT VERIFIED |
-| Refresh | Marks persist | NOT VERIFIED |
-| DataVersion | Changes after mark | NOT VERIFIED |
-| Subscriber | Fires after mark | NOT VERIFIED |
-| Session id | Same in setMark and generate | NOT VERIFIED |
-| Theory % | Independent, matches present/(present+absent) | NOT VERIFIED |
-| Practical/clinical % | Independent | NOT VERIFIED |
-| Ring arc | Proportional to attended/conducted | NOT VERIFIED |
-| Ring track | Visible grey remainder; theory ≠ practical grey | NOT VERIFIED |
-| Empty category | Not labelled Critical | NOT VERIFIED |
-| Week type coding | Stripe + T/P/C visible | NOT VERIFIED |
-| Time labels | am/pm | NOT VERIFIED |
-| Duration / breaks | Long classes wider; breaks visible | NOT VERIFIED |
-| Hydration | No mismatch | NOT VERIFIED |
-| TypeScript | Zero errors on a **fresh** `tsc` | NOT VERIFIED after last replacements |
+| Test                 | Expected                                        | Status                               |
+| -------------------- | ----------------------------------------------- | ------------------------------------ |
+| Present click        | Row, week tile, ring update                     | NOT VERIFIED                         |
+| Absent click         | Row, week tile, ring update                     | NOT VERIFIED                         |
+| Cancelled click      | Row, week tile, ring update                     | NOT VERIFIED                         |
+| Repeat active mark   | Returns to unmarked                             | NOT VERIFIED                         |
+| Refresh              | Marks persist                                   | NOT VERIFIED                         |
+| DataVersion          | Changes after mark                              | NOT VERIFIED                         |
+| Subscriber           | Fires after mark                                | NOT VERIFIED                         |
+| Session id           | Same in setMark and generate                    | NOT VERIFIED                         |
+| Theory %             | Independent, matches present/(present+absent)   | NOT VERIFIED                         |
+| Practical/clinical % | Independent                                     | NOT VERIFIED                         |
+| Ring arc             | Proportional to attended/conducted              | NOT VERIFIED                         |
+| Ring track           | Visible grey remainder; theory ≠ practical grey | NOT VERIFIED                         |
+| Empty category       | Not labelled Critical                           | NOT VERIFIED                         |
+| Week type coding     | Stripe + T/P/C visible                          | NOT VERIFIED                         |
+| Time labels          | am/pm                                           | NOT VERIFIED                         |
+| Duration / breaks    | Long classes wider; breaks visible              | NOT VERIFIED                         |
+| Hydration            | No mismatch                                     | NOT VERIFIED                         |
+| TypeScript           | Zero errors on a **fresh** `tsc`                | NOT VERIFIED after last replacements |
 
 ---
 
@@ -503,53 +510,345 @@ Or Ctrl+C in the window running `npm run dev`.
 [2026-09-20] Settings overlay work begun.
 [2026-09-22] Settings overlay committed: app/settings/, 9 files, 1218 insertions (824da48).
 [2026-09-22] Disk audit via tree /F. All three handover docs were each partially
-             correct; no code was ever lost.
+correct; no code was ever lost.
 [2026-09-22] Deleted dead file app/attendance/page.old.tsx.bak.
 [2026-09-22] MEMORY.md created as single source of truth, overriding AI memory.
 [2026-09-22 SESSION 2] Doc consolidation audit complete. AGENTS.md and CLAUDE.md
-             already point to MEMORY.md.
+already point to MEMORY.md.
 [2026-09-22] F5 persistence test: /attendance redirects to /attendance/setup.
-             Marking page missing — earlier agent built only setup + redirect.
+Marking page missing — earlier agent built only setup + redirect.
 [2026-09-22] DECISION: rebuild /attendance from scratch.
 
 [2026-09-24 REBUILD SESSION] Full v4 rebuild of the attendance logic layer.
 
-  Removed 1,618 lines of orphaned pre-rewrite code (56fcc3c):
-    components/attendance/{ClassEditorSheet,PostingScheduler,TimeField,WeekGrid}.tsx
-    lib/attendance/backup.ts
-  DateField.tsx restored (3a9ab7c) — still used by app/settings/academics.
-  Backup/restore moved into store.ts, now preserving entry ids.
+Removed 1,618 lines of orphaned pre-rewrite code (56fcc3c):
+components/attendance/{ClassEditorSheet,PostingScheduler,TimeField,WeekGrid}.tsx
+lib/attendance/backup.ts
+DateField.tsx restored (3a9ab7c) — still used by app/settings/academics.
+Backup/restore moved into store.ts, now preserving entry ids.
 
-  Rewritten to v4: types.ts, store.ts, calculate.ts, generate.ts.
-  Added: globals.css tile + ring tokens, WeekStrip.tsx, MarkList.tsx.
-  page.tsx replaced with a temporary stopgap so the dev server compiles.
+Rewritten to v4: types.ts, store.ts, calculate.ts, generate.ts.
+Added: globals.css tile + ring tokens, WeekStrip.tsx, MarkList.tsx.
+page.tsx replaced with a temporary stopgap so the dev server compiles.
 
-  Key fixes: exact-ratio comparisons (the 74.96% bug), all pooled numbers
-  deleted, per-subject-per-type thresholds, per-entry extra-class denominator
-  policy, workingDays filtering, DataVersion-keyed caches, blockouts now
-  outrank stale absence marks, deterministic ids verified throughout.
+Key fixes: exact-ratio comparisons (the 74.96% bug), all pooled numbers
+deleted, per-subject-per-type thresholds, per-entry extra-class denominator
+policy, workingDays filtering, DataVersion-keyed caches, blockouts now
+outrank stale absence marks, deterministic ids verified throughout.
 
-  ATTENDANCE_REBUILD_V2.md untracked and gitignored.
-  ATTENDANCE_REBUILD_SPEC.txt was never saved to disk — superseded by this file.
+ATTENDANCE_REBUILD_V2.md untracked and gitignored.
+ATTENDANCE_REBUILD_SPEC.txt was never saved to disk — superseded by this file.
 
-  `npx tsc --noEmit` → zero errors at that moment.
+`npx tsc --noEmit` → zero errors at that moment.
 
-  NEXT at that time: RingGrid.tsx, then page.tsx.
-  BLOCKING at that time: runMigrations() never called.
+NEXT at that time: RingGrid.tsx, then page.tsx.
+BLOCKING at that time: runMigrations() never called.
 
 [2026-09-24 UI ASSEMBLY + BUG CHASE] Work continued past the stopgap.
 
-  Written and wired: RingGrid.tsx, real page.tsx (WeekStrip + MarkList + RingGrid).
-  runMigrations() now called on the attendance page before first store read.
-  Hydration gate in page.tsx.
-  WeekStrip rotated: days as rows, time as columns, duration-proportional
-  segments, am/pm labels, inferred breaks, class-type stripe + letter.
-  MarkList: Tailwind v4 [--var] blank-button bug; Present/Absent/Cancelled colours.
-  RingGrid: visible tracks, modal detail, hard-coded category colours,
-  geometry from attended/conducted, no pair-only rings.
-  Page: no other-subjects dropdown; helper copy removed.
+Written and wired: RingGrid.tsx, real page.tsx (WeekStrip + MarkList + RingGrid).
+runMigrations() now called on the attendance page before first store read.
+Hydration gate in page.tsx.
+WeekStrip rotated: days as rows, time as columns, duration-proportional
+segments, am/pm labels, inferred breaks, class-type stripe + letter.
+MarkList: Tailwind v4 [--var] blank-button bug; Present/Absent/Cancelled colours.
+RingGrid: visible tracks, modal detail, hard-coded category colours,
+geometry from attended/conducted, no pair-only rings.
+Page: no other-subjects dropdown; helper copy removed.
 
-  NOT DONE: debug page, store.ts/generate.ts inspection, end-to-end mark trace.
+NOT DONE: debug page, store.ts/generate.ts inspection, end-to-end mark trace.
 
-  BLOCKING NOW: marked attendance does not match rings in the browser.
-  Do not start the next feature. Fix bugs first. Fresh tsc is unconfirmed.
+BLOCKING NOW: marked attendance does not match rings in the browser.
+Do not start the next feature. Fix bugs first. Fresh tsc is unconfirmed.
+
+---
+
+## SESSION LOG — 25 September 2026
+
+**Status:** Bug fixing. Diagnostic complete. One defect confirmed and isolated.
+
+### Verified baseline (do not re-investigate)
+
+- Branch `main`, last commit `e9ff51f`.
+- `npx tsc --noEmit` passes.
+- `app/attendance/debug/page.tsx` EXISTS and was fully replaced this session
+  with a controlled 7-panel diagnostic. It is TEMPORARY. Delete only after the
+  full test matrix passes.
+
+### BUG 1 — ONE-DAY TERM — ROOT CAUSE, WORKED AROUND, NOT YET FIXED IN CODE
+
+Symptom: 20 of 24 week sessions missing from the year dataset. Rings saw almost
+no data. OBG absent from "Where you stand".
+
+Root cause: **no screen in the entire app writes `settings.term`.** Grep of
+`app/` + `lib/` proved every reference is a read, a default, or a legacy
+migration:
+
+- `store.ts:278, 307-308` default both dates to `todayISO()`
+- `generate.ts:686, 699, 727-728` read the term to build the year window
+- `PostingsPanel.tsx` dates are POSTING dates, unrelated
+  So the only term value that ever existed was `today → today`. This is a
+  MISSING FEATURE, not a user configuration mistake.
+
+Temporary unblock applied via browser console to key
+`medprep.attendance.settings.v4`:
+
+### BUG 2 — FIXED 25 Sep 2026 — calculate.ts SECTION 6
+
+`computeYear()` rewritten to three explicit passes:
+PASS 1 real session buckets (curriculum-illegal categories dropped)
+PASS 2 every EXAM subject completed to its full legal category pair with 0/0
+PASS 3 opening-balance-only categories on NON-EXAM subjects (TRAP 9 intact)
+
+`bySubject` is now `Map<SubjectId, Map<ClassCategory, CategoryResult>>`. The
+local `put()` helper no-ops on an existing key, so a populated category can
+never be recomputed or overwritten by a later pass.
+
+TRAP 9 is NARROWED, not deleted: non-exam subjects still show only categories
+with real data. Exam subjects are exempt because they own a fixed outer/inner
+ring slot and a missing inner ring is worse than an empty one.
+
+Verified: medicine and paediatrics now return theory + clinical; no
+CATEGORY MISSING or SUBJECT MISSING in diagnostic section 5; all previously
+passing counts unchanged (medicine/theory 2/4, surgery/theory 2/3,
+surgery/clinical 3/5, obg/theory 2/2, paediatrics/theory 2/2).
+`npx tsc --noEmit` clean.
+
+NEXT: term fields on the setup screen (Bug 1 permanent fix).
+
+### BUG 2 — FIXED AND VERIFIED — 25 Sep 2026 — calculate.ts SECTION 6
+
+`computeYear()` rewritten to three explicit passes:
+PASS 1 real session buckets; curriculum-illegal categories dropped
+PASS 2 every EXAM subject completed to its full legal category pair with 0/0
+PASS 3 opening-balance-only categories on NON-EXAM subjects (TRAP 9 intact)
+
+`bySubject` is now Map<SubjectId, Map<ClassCategory, CategoryResult>>. The local
+put() helper no-ops on an existing key, so a populated category can never be
+recomputed or overwritten by a later pass.
+
+TRAP 9 NARROWED, not deleted: non-exam subjects still show only categories with
+real data. Exam subjects are exempt — they own a fixed outer/inner ring slot and
+a missing inner ring is worse than an empty one.
+
+VERIFIED in browser: no CATEGORY MISSING, no SUBJECT MISSING in diagnostic
+section 5. medicine and paediatrics now return theory + clinical. All previously
+passing counts unchanged. npx tsc --noEmit clean. Committed.
+
+### STILL OPEN — BUG 1 PERMANENT FIX
+
+The term is currently only settable by hand-editing localStorage key
+medprep.attendance.settings.v4. Any cleared storage or fresh install returns to
+the one-day term (today → today) and re-breaks everything. Setup screen needs
+term start/end inputs with validation. THIS IS THE NEXT FILE.
+
+### RING RENDERING — FIXED 25 Sep 2026
+
+Symptom: every ring looked full regardless of attendance; tiles looked cheap.
+
+ROOT CAUSE, not what it appeared to be. The arc maths was correct all along.
+The TRACK was tinted per category — theory track #cfc7dd against arc #7c3aed.
+A 0/0 ring drew a complete circle of pale violet, indistinguishable from a
+full violet arc at phone size.
+
+FIX: all tracks are now one neutral grey (#E8E8ED). COLOUR = ATTENDED,
+GREY = MISSED. Drawing delegated to AttendanceRing.tsx, which draws NO arc at
+all when conducted === 0 — an empty ring is a faint dotted track and nothing
+more, so 0/0 can never again read as 100%.
+
+RingGrid.tsx rewritten to:
+
+- pass outer = theory, inner = practical/clinical to AttendanceRing
+- compute geometry from attended/conducted only (never ratio/percentDisplay)
+- drop tile borders; depth from surface + one soft shadow, not outlines
+- two columns on mobile, larger rings, more whitespace
+- hairline threshold notch on the track, replacing 2.5px stubs
+- show the same ring large at the top of the detail modal
+
+tone="category" retained: hue = class type, label = safety. Unchanged rule.
+
+NEW FILE: app/attendance/components/AttendanceRing.tsx — presentational only,
+no store, no calculator, no Tailwind. Gradient arcs, round caps, useId for
+unique gradient ids (duplicate ids make every ring inherit the first one's
+colours — classic SVG trap).
+
+### RING SILHOUETTE — FIXED 25 Sep 2026 — AttendanceRing.tsx
+
+Symptom: "circle doesn't look too circly." Geometry was correct; the OUTLINE
+was being broken by three details:
+
+1. Threshold notch overhung the rim. Drawn radius±(STROKE/2 − 1) with round
+   caps, which add ~half the line width beyond each endpoint → visible stubs
+   at 9 o'clock. Now inset to STROKE/2 − 2.5 with butt caps: a mark ON the
+   ring, never a spur off it.
+2. Empty track used strokeDasharray '1 7' + round caps → scalloped, beaded
+   rim. Now a solid, very light track (#F0F0F4). Lightness says "empty";
+   texture is not needed and costs the outline.
+3. Arc round start-cap mounted the track edge at 12 o'clock. Dash is now
+   trimmed by STROKE/2 so the cap curve completes inside the band.
+
+Also: STROKE 11→13, GAP 7→5, R_OUTER 50→51. Thin hoops with a large hole read
+as wireframe; Activity rings are ~22% of radius and that weight is most of why
+they look solid.
+
+Added shapeRendering:'geometricPrecision' (stops curve points snapping to the
+pixel grid, which makes small circles look polygonal) and flexShrink:0 (stops a
+narrow grid column squashing the SVG into an oval).
+
+### BAND VOCABULARY — FIXED 25 Sep 2026 — RingGrid.tsx
+
+Symptom: three of four subjects read "Critical" simultaneously. A warning that
+describes most of the screen describes nothing.
+
+Cause was semantic, not arithmetic. bandFor() returns 'critical' for anything
+more than dangerMargin below threshold, so a subject at 50% in week four of a
+six-month term qualified — despite being comfortably recoverable.
+
+★ THE DISTINCTION IS REACHABILITY, NOT DISTANCE. calculate.ts already computes
+targetUnreachable (true only when attending EVERY remaining class still misses
+the threshold). It was being computed and ignored.
+
+RingGrid now maps to five display standings, checking targetUnreachable FIRST:
+unreachable → "Critical" (any band, if targetUnreachable)
+critical → "Well behind" (downgraded)
+danger → "Behind"
+warning → "Watch"
+safe → "On track"
+
+Grid sort order now uses standing, not raw band.
+Modal chip and per-category percentage colour use the same mapping.
+
+⚠ DISPLAY ONLY. No band, ratio, threshold or count is recalculated in RingGrid.
+calculate.ts remains the sole source of arithmetic. SafetyBand in types.ts is
+unchanged — the four-value union is still what the calculator produces.
+
+### "CRITICAL" — SECOND PASS — 25 Sep 2026 — calculate.ts
+
+After the RingGrid standing gate, only General Surgery still read Critical.
+Cause: surgery clinical is a POSTING block (21–25 Sep). Past its end date there
+are no future unmarked sessions, so remainingWeight === 0, so
+isUnreachable(3, 5, 0, 80) returns true — best case 60% vs 80% threshold.
+
+Mathematically correct, semantically wrong. A finished posting block is not a
+finished term; it usually means the NEXT block has not been entered yet.
+
+FIX: targetUnreachable now requires remainingWeight > 0. With zero runway the
+band alone conveys severity ("Well behind"). "Critical" is reserved for: runway
+exists AND attending every remaining class still misses the threshold.
+
+⚠ SIDE EFFECT, ACCEPTED: at genuine term end every category has
+remainingWeight 0, so nothing will ever say Critical on the final day. If an
+end-of-term "finalised / below requirement" state is wanted later, add an
+explicit isFinalised flag driven by settings.term.endDate — do NOT revert this.
+
+### RING VISUALS — DONE 25 Sep 2026
+
+Silhouette fixed, verified in browser. Circular outline, neutral grey tracks,
+inset butt-cap notch, solid light track for empty rings, STROKE 13 / GAP 5.
+Tiles: no borders, soft elevation, two columns. Legend labels outer/inner.
+
+### "CRITICAL" — RESOLVED, NOT A BUG 25 Sep 2026
+
+After both fixes only General Surgery reads Critical, and it EARNS it:
+surgery/clinical 3/5 at an 80% threshold needs x ≥ 5 consecutive classes
+((3+x)/(5+x) ≥ 0.8). Fewer than 5 remain scheduled, so runway exists but is
+insufficient → targetUnreachable true → "Critical". Correct behaviour.
+
+ROOT CAUSE IS DATA, NOT CODE: only the current surgery posting block
+(21-25 Sep) is entered. Adding the next posting block restores runway and the
+label self-corrects to "Well behind". If no further surgery clinical sessions
+exist this term, 60% vs 80% is genuinely final and Critical is accurate.
+
+DO NOT soften targetUnreachable further to make this label go away.
+
+### BUG 1 — PERMANENTLY FIXED 25 Sep 2026 — new file setup/TermPanel.tsx
+
+The term is now settable in the UI. Previously NOTHING in app/ or lib/ ever
+wrote settings.term — every reference was a read, a default (store.ts:278,
+307-308, both todayISO()), or a legacy migration. The only value that had ever
+existed on a real device was a ONE-DAY TERM, which silently starved
+generateForYear() and caused every symptom chased this session.
+
+TermPanel sits under HoursCard in setup. Warns on: one-day term, span under 14
+days, end before start, today before start, today after end. Warnings name the
+CONSEQUENCE ("anything you mark outside this range will not reach your rings"),
+not the rule.
+
+⚠ Uses LOCAL DRAFT STATE + commit on blur, unlike the rest of setup which
+writes immediately. A date input fires onChange per keystroke; typing a year
+would write 0002/0020/0202/2027, bumping DataVersion and regenerating the term
+four times. Draft state is the deliberate exception, not an oversight.
+
+LESSON RECORDED: a required setting with a plausible default and no UI is worse
+than one with no default. A missing value announces itself; a default of
+`today` poisons every downstream calculation while looking reasonable in the
+debugger.
+
+REMAINING QUEUE:
+
+1. WeekStrip: start/end times inside tiles, remove break duration labels
+2. WeekStrip: prev/next week navigation + date jump + "This week"
+3. Delete debug route once the test matrix passes
+
+### WEEKSTRIP — TILE TIMES + WEEK NAVIGATION — 25 Sep 2026
+
+TILE TIMES: each class tile now shows its own start (left) and end (right) at
+0.5rem, with code + T/P/C centred above. Grid floor raised 2.75rem → 4.5rem —
+two timestamps do not fit
+### WEEKSTRIP — TILE TIMES + WEEK NAVIGATION — 25 Sep 2026
+
+TILE TIMES: each class tile now shows its own start (left) and end (right) at
+0.5rem, with code + T/P/C centred above. Grid floor raised 2.75rem to 4.5rem —
+two timestamps do not fit in 44px at a legible size. Cost: the strip scrolls
+sideways more often. Correct trade on a phone, where swiping is free and
+squinting is not.
+
+BREAK DURATION LABELS REMOVED from the time header. Redundant once every tile
+states its own end: the gap between one tile's end and the next tile's start
+IS the break, already stated twice. The dashed divider still marks it.
+
+NAVIGATION: prev/next week, "Today" (rendered only when not on the current
+week — a permanently visible Today button does nothing most of the time), and
+a date jump implemented as a transparent input type=date over the range label,
+so a phone opens the OS wheel instead of a hand-built HTML calendar.
+
+SWIPE, AND THE GESTURE CONFLICT. The strip is already a horizontal scroller —
+that is the point of days-as-rows. A swipe handler over a horizontal scroller
+fights it and the user loses. RESOLVED: the week gesture only ARMS at a
+scroller edge. scrollLeft 0 + rightward drag = previous week; scrollLeft max +
+leftward drag = next week; anywhere between, native scroll is untouched. Two
+extra filters: the drag must be mostly horizontal (dx > dy) so vertical page
+scrolling never changes week, and it must clear 56px so a wobbly tap does
+nothing. touchAction pan-y keeps vertical scrolling native.
+
+STATE: localAnchor is a FALLBACK, not a second owner. page.tsx still owns
+selectedDate; navigating always calls onSelectDay. localAnchor only covers the
+case where a parent does not feed the date back through anchorDate — without
+it the strip would navigate then snap back, which reads as a broken button. It
+is cleared by an effect on parentAnchor, so a controlled parent always wins.
+
+OUTSIDE-TERM WARNING added, unprompted but necessary now that TermPanel makes
+the term real and settable. Navigating past the term edges shows an amber note:
+marks made out there are saved but never reach the rings. Silently rendering a
+normal grid is exactly the deception that cost this project weeks.
+
+npx tsc --noEmit clean.
+
+QUEUE ITEMS 1 AND 2 CLOSED. Remaining: delete app/attendance/debug/page.tsx
+once the section 15 matrix passes.
+### WEEKSTRIP — LONG PRESS + PINNED COMPACT CARD — 25 Sep 2026
+
+Compact strip is pinned to THIS week. Overlay owns browseAnchor and throws
+it away on close. They never share an anchor.
+
+Long-press (450ms, 10px) expands into a blurred overlay. Swipe lives only
+there: follows the finger, glides past 56px, incoming week enters from the
+opposite side. Compact card has no arrows.
+
+Times live on the rail, not on every tile. Start at the left edge of a
+class column; end only after a gap or on the last column.
+
+tsc clean. ESLint/React Compiler clean (hooks ordered, hint via
+useSyncExternalStore). Matrix rounds 1–5 PASSED.
+
+QUEUE CLOSED. Debug route deleted after matrix pass.
