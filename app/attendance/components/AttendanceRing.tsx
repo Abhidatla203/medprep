@@ -1,24 +1,24 @@
-// =============================================================================
+﻿// =============================================================================
 // app/attendance/components/AttendanceRing.tsx
 // -----------------------------------------------------------------------------
-// Concentric attendance rings. Presentational ONLY — no store, no calculator,
+// Concentric attendance rings. Presentational ONLY â€” no store, no calculator,
 // no Tailwind. Give it numbers, it draws them.
 //
 // DESIGN RULES
 //  1. The coloured arc IS the attended fraction. An empty category
-//     (conducted === 0) draws NO arc — just the track.
+//     (conducted === 0) draws NO arc â€” just the track.
 //  2. Track is always visible underneath. The grey remainder is the story.
 //  3. Round caps on the ARC ONLY. No glow, no drop shadow, no halo.
 //  4. Outer ring = theory. Inner ring = practical/clinical. Fixed, always.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ WHY THE RINGS DID NOT LOOK CIRCULAR — 25 Sep 2026
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  âš  WHY THE RINGS DID NOT LOOK CIRCULAR â€” 25 Sep 2026
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //  The geometry was always mathematically perfect. Three details broke the
 //  SILHOUETTE, which is what the eye actually judges:
 //
 //  1. THE NOTCH OVERHUNG THE TRACK.
-//     It ran from radius−STROKE/2+1 to radius+STROKE/2−1, but round caps add
+//     It ran from radiusâˆ’STROKE/2+1 to radius+STROKE/2âˆ’1, but round caps add
 //     ~half the line width beyond each endpoint. Net result: a stub sticking
 //     out past the rim at the threshold angle. A circle with a bump on it is
 //     not read as a circle. The notch is now INSET well within the stroke and
@@ -34,30 +34,30 @@
 //     a hair at both ends so the cap curve completes inside the stroke band.
 //
 //  Also: thicker stroke, tighter gap, larger radii. Thin hoops with a big hole
-//  read as wireframe. Apple's Activity rings are ~22% of the radius — that
+//  read as wireframe. Apple's Activity rings are ~22% of the radius â€” that
 //  weight is most of why they look solid and expensive.
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 'use client';
 
 import { useId } from 'react';
 
 // -----------------------------------------------------------------------------
-// Geometry. One source of truth — change here, everything follows.
+// Geometry. One source of truth â€” change here, everything follows.
 // -----------------------------------------------------------------------------
 
 const BOX = 120;              // viewBox units; scales to any rendered size
 const C = BOX / 2;            // centre
-const STROKE = 13;            // ring thickness (was 11 — too thin to feel solid)
+const STROKE = 13;            // ring thickness (was 11 â€” too thin to feel solid)
 const GAP = 5;                // breathing room between the two rings
 const R_OUTER = 51;           // outer edge lands at 57.5, inside the 60 box
 const R_INNER = R_OUTER - STROKE - GAP;   // 33
 
 const TRACK = '#E6E6EB';      // iOS systemGray5, neutral. GREY = NOT ATTENDED.
-const TRACK_EMPTY = '#F0F0F4';// lighter still — "nothing scheduled"
+const TRACK_EMPTY = '#F0F0F4';// lighter still â€” "nothing scheduled"
 const NOTCH = 'rgba(60,60,67,0.30)';
 
-/** Band → gradient stops. Two stops only; three starts looking like a toy. */
+/** Band â†’ gradient stops. Two stops only; three starts looking like a toy. */
 const BAND_COLORS: Record<string, [string, string]> = {
   safe:     ['#34C759', '#30B0C7'],
   warning:  ['#FFCC00', '#FF9500'],
@@ -65,7 +65,7 @@ const BAND_COLORS: Record<string, [string, string]> = {
   critical: ['#FF3B30', '#D70015'],
 };
 
-/** Category tint — hue tells you WHAT the class is, not how you are doing. */
+/** Category tint â€” hue tells you WHAT the class is, not how you are doing. */
 const CATEGORY_COLORS: Record<string, [string, string]> = {
   theory:    ['#AF52DE', '#5E5CE6'],
   practical: ['#0A84FF', '#30B0C7'],
@@ -75,13 +75,13 @@ const CATEGORY_COLORS: Record<string, [string, string]> = {
 export type RingTone = 'band' | 'category';
 
 export interface RingSpec {
-  /** 0–1, exact. Pass attended/conducted. Never a rounded percentage. */
+  /** 0â€“1, exact. Pass attended/conducted. Never a rounded percentage. */
   ratio: number;
   /** True when conducted === 0. Draws track only. */
   isEmpty: boolean;
   band: string;
   category: string;
-  /** Pass mark, 0–100. Draws the notch. Omit to hide it. */
+  /** Pass mark, 0â€“100. Draws the notch. Omit to hide it. */
   threshold?: number;
   isExcluded?: boolean;
 }
@@ -106,18 +106,20 @@ function colorsFor(spec: RingSpec, tone: RingTone): [string, string] {
   return table[key] ?? BAND_COLORS.safe;
 }
 
+// Colours are resolved by the parent and arrive as a gradient id, so Ring
+// never needs the tone. It used to take one and ignore it.
 function Ring(props: {
   spec: RingSpec;
   radius: number;
-  tone: RingTone;
   gradientId: string;
 }) {
-  const { spec, radius, tone, gradientId } = props;
+  const { spec, radius, gradientId } = props;
+
 
   const circumference = arcLength(radius);
   const ratio = Math.max(0, Math.min(1, spec.ratio));
 
-  // ★ Empty means NO arc. A ring with nothing in it must never read as full.
+  // â˜… Empty means NO arc. A ring with nothing in it must never read as full.
   const showArc = !spec.isEmpty && ratio > 0;
 
   // Round caps extend half the stroke past each endpoint. Trimming that much
@@ -133,7 +135,7 @@ function Ring(props: {
     : 0;
 
   // Notch lives strictly INSIDE the stroke band. This is the fix for the
-  // "bumpy circle" — nothing may cross the rim.
+  // "bumpy circle" â€” nothing may cross the rim.
   const notchAngle =
     spec.threshold !== undefined && spec.threshold > 0 && spec.threshold < 100
       ? ((spec.threshold / 100) * 360 - 90) * (Math.PI / 180)
@@ -143,7 +145,7 @@ function Ring(props: {
 
   return (
     <g opacity={spec.isExcluded ? 0.35 : 1}>
-      {/* TRACK — the unattended remainder. Solid. No dashes, no caps:
+      {/* TRACK â€” the unattended remainder. Solid. No dashes, no caps:
           a full circle needs neither, and both cost the clean outline. */}
       <circle
         cx={C}
@@ -154,7 +156,7 @@ function Ring(props: {
         strokeWidth={STROKE}
       />
 
-      {/* THRESHOLD NOTCH — a mark ON the ring, never a spur off it. */}
+      {/* THRESHOLD NOTCH â€” a mark ON the ring, never a spur off it. */}
       {notchAngle !== null && !spec.isEmpty && (
         <line
           x1={C + (radius - notchInset) * Math.cos(notchAngle)}
@@ -167,7 +169,7 @@ function Ring(props: {
         />
       )}
 
-      {/* PROGRESS ARC — starts at 12 o'clock, sweeps clockwise. */}
+      {/* PROGRESS ARC â€” starts at 12 o'clock, sweeps clockwise. */}
       {showArc && (
         <circle
           cx={C}
@@ -196,7 +198,7 @@ export default function AttendanceRing({
   children,
 }: AttendanceRingProps) {
   // useId keeps gradient ids unique. Duplicate ids make every ring on the page
-  // inherit the first one's colours — a classic SVG trap.
+  // inherit the first one's colours â€” a classic SVG trap.
   const uid = useId().replace(/:/g, '');
   const outerGrad = `og-${uid}`;
   const innerGrad = `ig-${uid}`;
@@ -220,7 +222,7 @@ export default function AttendanceRing({
       }}
     >
       <defs>
-        {/* Diagonal gradient. A flat fill looks cheap; a 45° sweep reads as
+        {/* Diagonal gradient. A flat fill looks cheap; a 45Â° sweep reads as
             depth without any shadow or glow. */}
         <linearGradient id={outerGrad} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor={o1} />
@@ -232,10 +234,10 @@ export default function AttendanceRing({
         </linearGradient>
       </defs>
 
-      <Ring spec={outer} radius={R_OUTER} tone={tone} gradientId={outerGrad} />
+      <Ring spec={outer} radius={R_OUTER} gradientId={outerGrad} />
 
       {inner && (
-        <Ring spec={inner} radius={R_INNER} tone={tone} gradientId={innerGrad} />
+        <Ring spec={inner} radius={R_INNER} gradientId={innerGrad} />
       )}
 
       {children && (

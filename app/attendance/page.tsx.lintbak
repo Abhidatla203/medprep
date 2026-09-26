@@ -1,26 +1,26 @@
-﻿'use client';
+'use client';
 
 // =============================================================================
 // app/attendance/page.tsx
 // -----------------------------------------------------------------------------
 // Three children, in the order a student actually uses them:
-//   1. WeekStrip â€” "have I logged everything?"   read-only
-//   2. MarkList  â€” the ten-second daily habit    the only marking surface
-//   3. RingGrid  â€” "am I safe?"                  resting view, no numbers
+//   1. WeekStrip — "have I logged everything?"   read-only
+//   2. MarkList  — the ten-second daily habit    the only marking surface
+//   3. RingGrid  — "am I safe?"                  resting view, no numbers
 //
-// â˜… NO "OTHER SUBJECTS" DROPDOWN. Spec Â§4.4: every subject in THIS YEAR'S
+// ★ NO "OTHER SUBJECTS" DROPDOWN. Spec §4.4: every subject in THIS YEAR'S
 //   schedule appears on the main page. Burying half of them behind a disclosure
-//   triangle recreated the exact failure the ring grid exists to prevent â€” a
+//   triangle recreated the exact failure the ring grid exists to prevent — a
 //   subject sliding toward debarment while the screen looks calm.
 //
-// âš  selectedDate LIVES HERE. The strip and the list must always agree on which
+// ⚠ selectedDate LIVES HERE. The strip and the list must always agree on which
 //   day is in focus. If either owned that state the other would need telling,
 //   and they would drift the first time a third entry point appeared (the list
 //   already has a calendar jump). One owner, two consumers, no sync code.
 //
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  âš  WHY useSyncExternalStore AND NOT useEffect + useState
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⚠ WHY useSyncExternalStore AND NOT useEffect + useState
+// ═════════════════════════════════════════════════════════════════════════════
 // This page used to do the classic thing:
 //
 //     const [mounted, setMounted] = useState(false);
@@ -28,7 +28,7 @@
 //
 // React 19's react-hooks/set-state-in-effect rule rejects that, and it is right
 // to. Calling setState in an effect body forces a SECOND render immediately
-// after the first â€” the component paints, React notices state changed, and
+// after the first — the component paints, React notices state changed, and
 // paints again. On a mid-range phone that is a visible flicker on every open.
 //
 // localStorage is an EXTERNAL STORE. useSyncExternalStore is the hook built for
@@ -37,22 +37,22 @@
 //   1. HYDRATION. It takes a separate server snapshot. The server and the first
 //      client render both read `false` and produce the identical skeleton, so
 //      there is no mismatch. The client snapshot (`true`) is adopted straight
-//      after hydration, in the same commit â€” not in a follow-up render.
+//      after hydration, in the same commit — not in a follow-up render.
 //
 //   2. REPAINTING ON WRITES. Our store's subscribe() is exactly the shape this
 //      hook wants. The counter lives at MODULE level, not in component state,
 //      because getSnapshot must return a value that is stable between
-//      notifications â€” return a fresh object or a fresh number each call and
+//      notifications — return a fresh object or a fresh number each call and
 //      React loops forever.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════
 //
-// â˜… MIGRATIONS RUN BEFORE THE FIRST STORE READ. runMigrations() converts
-//   v2 â†’ v3 â†’ v4 and was called by nothing for several build steps, meaning
+// ★ MIGRATIONS RUN BEFORE THE FIRST STORE READ. runMigrations() converts
+//   v2 → v3 → v4 and was called by nothing for several build steps, meaning
 //   anyone upgrading silently landed on defaults: 75% everywhere, extras
 //   reverting to the old global policy, custom targets gone.
 //
 //   It is now a plain module-level function with its own guard, called during
-//   render from the client-only subtree â€” NOT from an effect. Three things this
+//   render from the client-only subtree — NOT from an effect. Three things this
 //   buys us:
 //     1. It cannot possibly run after a store read, because it runs on the line
 //        above the first one.
@@ -61,12 +61,12 @@
 //     3. Its result is a plain value, so it needs no state and triggers no
 //        extra render.
 //
-//   âš  STILL OUTSTANDING (SM-1): a student whose first stop is /settings reads
+//   ⚠ STILL OUTSTANDING (SM-1): a student whose first stop is /settings reads
 //     pre-migration data. Proper home is a root-layout effect. Do it when the
 //     settings shell is built, alongside the layout.tsx font issue.
 // =============================================================================
 
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 
 import WeekStrip from './components/WeekStrip';
@@ -83,7 +83,7 @@ import type { ISODate } from './types';
 // Module-level plumbing
 //
 // Everything here is deliberately OUTSIDE the component. Module scope survives
-// remounts, StrictMode's deliberate double-invoke, and fast refresh â€” which is
+// remounts, StrictMode's deliberate double-invoke, and fast refresh — which is
 // precisely the lifetime a one-shot migration and a store counter need.
 // =============================================================================
 
@@ -91,7 +91,7 @@ import type { ISODate } from './types';
  * Bumped once per store write. useSyncExternalStore compares the value it gets
  * from getSnapshot against the previous one; a change means re-render.
  *
- * âš  MUST live out here. As component state it would reset on every remount and
+ * ⚠ MUST live out here. As component state it would reset on every remount and
  *   the hook would lose track of what it had already seen.
  */
 let storeRevision = 0;
@@ -99,7 +99,7 @@ let storeRevision = 0;
 /**
  * The subscribe function handed to useSyncExternalStore.
  *
- * âš  MUST be a stable reference â€” defining it inside the component would give
+ * ⚠ MUST be a stable reference — defining it inside the component would give
  *   React a brand-new function every render, and it would dutifully unsubscribe
  *   and resubscribe every single time.
  */
@@ -119,8 +119,8 @@ const getServerRevision = (): number => 0;
  * The mount gate, expressed as an external store that never changes.
  *
  * A subscribe function that does nothing is correct here, not lazy: this
- * "store" has exactly two states â€” rendering on the server and rendering on the
- * client â€” and it can never transition again once mounted. Nothing to notify.
+ * "store" has exactly two states — rendering on the server and rendering on the
+ * client — and it can never transition again once mounted. Nothing to notify.
  */
 const subscribeToNothing = (): (() => void) => () => {};
 const getIsClient = (): boolean => true;
@@ -130,7 +130,7 @@ const getIsServer = (): boolean => false;
  * Migration, run at most once per page load.
  *
  * `null` means "not attempted yet". After the first call it holds the notes
- * array â€” usually empty, because a fresh install has nothing to convert.
+ * array — usually empty, because a fresh install has nothing to convert.
  */
 let migrationNotes: string[] | null = null;
 
@@ -147,7 +147,7 @@ function ensureMigrationsHaveRun(): string[] {
   } catch {
     // A failed migration must never white-screen the app. Old data is READ,
     // never deleted, so a failure leaves the student on defaults with their
-    // data still recoverable â€” bad, but survivable.
+    // data still recoverable — bad, but survivable.
     migrationNotes = [];
   }
 
@@ -160,7 +160,7 @@ function ensureMigrationsHaveRun(): string[] {
 // =============================================================================
 
 export default function AttendancePage() {
-  // False on the server AND on the first client render â€” that equality IS the
+  // False on the server AND on the first client render — that equality IS the
   // hydration fix. Flips to true on adoption, with no extra render pass.
   const isMounted = useSyncExternalStore(subscribeToNothing, getIsClient, getIsServer);
 
@@ -173,7 +173,7 @@ export default function AttendancePage() {
 /**
  * Rendered by the server and by the first client pass.
  *
- * âš  MUST CONTAIN NO STORE READS. One localStorage value here and the mismatch
+ * ⚠ MUST CONTAIN NO STORE READS. One localStorage value here and the mismatch
  *   simply moves rather than disappearing.
  */
 function Skeleton() {
@@ -196,8 +196,8 @@ function Skeleton() {
  * runs before migration.
  */
 function AttendanceContent() {
-  // â˜… LINE ONE, AND IT MUST STAY LINE ONE. Every read below â€” getSettings,
-  //   getYearResult, getUnmarkedCount â€” depends on the data already having been
+  // ★ LINE ONE, AND IT MUST STAY LINE ONE. Every read below — getSettings,
+  //   getYearResult, getUnmarkedCount — depends on the data already having been
   //   converted. Ordering here is not style, it is correctness.
   const notes = ensureMigrationsHaveRun();
 
@@ -217,15 +217,10 @@ function AttendanceContent() {
   const settings = getSettings();
   const year = settings.currentYear;
 
-  // â˜… THE ONE PIECE OF STATE THIS PAGE OWNS.
+  // ★ THE ONE PIECE OF STATE THIS PAGE OWNS.
   const [selectedDate, setSelectedDate] = useState<ISODate>(today);
 
-  // NOT useCallback. React Compiler memoises this automatically, and when a
-  // manual dependency list disagrees with what it infers, it gives up and
-  // skips optimising the ENTIRE component. It inferred setSelectedDate;
-  // the hand-written list said [today]. One stale memo cost the whole page
-  // its optimisation. (SM-13)
-  const jumpToToday = () => setSelectedDate(today);
+  const jumpToToday = useCallback(() => setSelectedDate(today), [today]);
 
   /**
    * ONE call. getYearResult is memoised on DataVersion, so after the first
@@ -281,7 +276,7 @@ function AttendanceContent() {
               aria-label="Dismiss"
               className="modal-close"
             >
-              âœ•
+              ✕
             </button>
           </div>
         </div>
@@ -289,10 +284,10 @@ function AttendanceContent() {
 
       {/* ---------------------------------------------------- header -------
           TWO doors, deliberately distinct:
-            Setup    â†’ facts about your college (timetable, hours, postings)
-            Settings â†’ your preferences (thresholds, alerts, appearance)
+            Setup    → facts about your college (timetable, hours, postings)
+            Settings → your preferences (thresholds, alerts, appearance)
           Keeping them visually equal is the point. If Settings were hidden
-          behind Setup, thresholds would stay undiscoverable â€” which is the
+          behind Setup, thresholds would stay undiscoverable — which is the
           state they have been in for three sessions. */}
       <header className="mb-3 flex items-baseline justify-between gap-3">
         <div className="min-w-0">

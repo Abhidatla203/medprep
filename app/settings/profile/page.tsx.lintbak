@@ -1,64 +1,38 @@
 "use client";
 
-// =============================================================================
-// app/settings/profile/page.tsx
-// -----------------------------------------------------------------------------
-// Name, photo, birthday, university, academic year, admission year.
-//
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ WHY THE DRAFTS USE useSyncedDraft AND NOT useEffect
-// ═════════════════════════════════════════════════════════════════════════════
-// This page holds a DRAFT of six saved values, so you can edit freely and press
-// Save when you are ready. Drafts need to do two contradictory things:
-//
-//   1. While you are typing, hold YOUR text — not the stored value. Otherwise
-//      every keystroke is overwritten the instant you make it.
-//
-//   2. If the stored value changes from elsewhere — a backup import, a reset,
-//      a second browser tab — catch up. Otherwise you are editing a ghost, and
-//      pressing Save quietly reinstates data you already replaced.
-//
-// The old code did this with an effect:
-//
-//     useEffect(() => { setFirstName(settings.firstName); /* ...×6 */ },
-//               [settings.firstName, /* ...×6 */]);
-//
-// Which renders ONCE WITH THE OLD VALUES and corrects on a second pass. React
-// 19's react-hooks/set-state-in-effect rule rejects it, and the rule is right:
-// there is a real frame where this form shows stale data.
-//
-// useSyncedDraft does the same job DURING render. React discards the in-flight
-// render and re-runs immediately, so nothing stale is ever painted. Same two
-// rules honoured, one fewer render, one fewer glitch.
-//
-// ⚠ All six values here are plain strings, so the default Object.is comparison
-//   is correct. If a value were ever an object or array, it would need
-//   jsonEqual — see lib/useSyncedDraft.ts for why that matters.
-// ═════════════════════════════════════════════════════════════════════════════
-
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { UNIVERSITY, YEARS, type Year } from "../../data/universities/ntruhs/curriculum";
 import { ageFromBirthday, useSettings } from "../../store/settings";
-import { useSyncedDraft } from "@/lib/useSyncedDraft";
 import PhotoCropper from "./PhotoCropper";
 
 export default function ProfileSettingsPage() {
   const settings = useSettings();
-
-  // ---- Drafts. Each one follows the store until you start editing it. ----
-  const [firstName, setFirstName] = useSyncedDraft(settings.firstName);
-  const [lastName, setLastName] = useSyncedDraft(settings.lastName);
-  const [birthday, setBirthday] = useSyncedDraft(settings.birthday);
-  const [joiningYear, setJoiningYear] = useSyncedDraft(settings.joiningYear);
-  const [year, setYear] = useSyncedDraft<Year>(settings.year);
-  const [photo, setPhoto] = useSyncedDraft(settings.photo);
-
-  // ---- Genuinely local. Neither belongs in the store. ----
+  const [firstName, setFirstName] = useState(settings.firstName);
+  const [lastName, setLastName] = useState(settings.lastName);
+  const [birthday, setBirthday] = useState(settings.birthday);
+  const [joiningYear, setJoiningYear] = useState(settings.joiningYear);
+  const [year, setYear] = useState<Year>(settings.year);
+  const [photo, setPhoto] = useState(settings.photo);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [savedAt, setSavedAt] = useState(0);
 
-  const age = ageFromBirthday(birthday);
+  useEffect(() => {
+    setFirstName(settings.firstName);
+    setLastName(settings.lastName);
+    setBirthday(settings.birthday);
+    setJoiningYear(settings.joiningYear);
+    setYear(settings.year);
+    setPhoto(settings.photo);
+  }, [
+    settings.firstName,
+    settings.lastName,
+    settings.birthday,
+    settings.joiningYear,
+    settings.year,
+    settings.photo,
+  ]);
 
+  const age = ageFromBirthday(birthday);
   const dirty =
     firstName !== settings.firstName ||
     lastName !== settings.lastName ||
@@ -69,8 +43,6 @@ export default function ProfileSettingsPage() {
 
   function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    // Clear the input first: without this, choosing the SAME file twice in a
-    // row fires no change event, and the cropper never opens the second time.
     e.target.value = "";
     if (!file) return;
     setCropFile(file);
@@ -78,8 +50,6 @@ export default function ProfileSettingsPage() {
 
   function save() {
     settings.saveProfile({ firstName, lastName, birthday, joiningYear, year, photo });
-    // Date.now() in an event handler is fine — it is only unsafe during render,
-    // where a value that changes every pass makes re-renders unpredictable.
     setSavedAt(Date.now());
   }
 
@@ -143,8 +113,6 @@ export default function ProfileSettingsPage() {
           </label>
           <label className="block">
             <span className="text-sm font-semibold text-slate-200">Age</span>
-            {/* Derived from birthday, never stored. A stored age is wrong the
-                day after you save it. */}
             <input
               value={age}
               readOnly
@@ -167,7 +135,6 @@ export default function ProfileSettingsPage() {
               key={y}
               type="button"
               onClick={() => setYear(y)}
-              aria-pressed={year === y}
               className={`rounded-xl border px-4 py-3 text-left text-sm transition ${
                 year === y
                   ? "border-teal-500/60 bg-teal-500/10 text-teal-200"
@@ -204,28 +171,14 @@ export default function ProfileSettingsPage() {
         {dirty ? <span className="text-sm text-slate-500">Unsaved</span> : null}
       </div>
 
-            {/* ⚠ Mounted ONLY while cropping, and keyed on the file itself.
-          Two reasons, and both matter:
-
-          1. `file` is non-null inside, so the lazy createObjectURL cannot be
-             handed null. Rendering this unconditionally is what threw
-             "Overload resolution failed".
-
-          2. A new file means a new key means a genuinely new component, so
-             zoom and offset start fresh with no reset logic at all. Remount
-             beats reset: there is no "did I remember to clear that too?" */}
-      {cropFile && (
-        <PhotoCropper
-          key={`${cropFile.name}-${cropFile.lastModified}-${cropFile.size}`}
-          file={cropFile}
-          onCancel={() => setCropFile(null)}
-          onConfirm={(dataUrl) => {
-            setPhoto(dataUrl);
-            setCropFile(null);
-          }}
-        />
-      )}
-
+      <PhotoCropper
+        file={cropFile}
+        onCancel={() => setCropFile(null)}
+        onConfirm={(dataUrl) => {
+          setPhoto(dataUrl);
+          setCropFile(null);
+        }}
+      />
     </div>
   );
 }

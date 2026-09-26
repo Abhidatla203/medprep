@@ -1,53 +1,26 @@
 "use client";
 
-// =============================================================================
-// app/settings/academics/page.tsx
-// -----------------------------------------------------------------------------
-// Exam date, the ENT/Ophthalmology year toggle, and a door through to the
-// per-year exam subject editor.
-//
-// ⚠ DRAFTS USE useSyncedDraft, NOT useEffect.
-//   Both values below are editable drafts: you change them, then press Save.
-//   A draft has to hold YOUR edit while you are typing, but still catch up if
-//   the stored value changes elsewhere (import, reset, second tab).
-//
-//   Doing that in an effect renders once with the OLD value and corrects on a
-//   second pass — a real, if brief, frame of stale data, and the reason React
-//   19 rejects it. useSyncedDraft does the same job during render, so nothing
-//   stale is ever painted. Full reasoning in lib/useSyncedDraft.ts.
-//
-// ⚠ The ENT/Ophtha toggle is not cosmetic. It MOVES two subjects between
-//   3rd MBBS Part 1 and Part 2 — see applyEntOphthaShift in app/store/settings.
-//   Flipping it changes which subjects are examinable in a year, so it belongs
-//   behind an explicit Save rather than writing on tap.
-// =============================================================================
-
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import DateField from "@/components/attendance/DateField";
 import { useSettings } from "../../store/settings";
-import { useSyncedDraft } from "@/lib/useSyncedDraft";
 
 export default function AcademicsSettingsPage() {
   const settings = useSettings();
-
-  // ---- Drafts. Both plain values, so the default comparison is correct. ----
-  const [examDate, setExamDate] = useSyncedDraft(settings.examDate);
-  const [entOphthaInFinalYear, setEntOphthaInFinalYear] = useSyncedDraft(
-    settings.entOphthaInFinalYear,
-  );
-
-  // Genuinely local — a UI acknowledgement, not data.
+  const [examDate, setExamDate] = useState(settings.examDate);
+  const [entOphthaInFinalYear, setEntOphthaInFinalYear] = useState(settings.entOphthaInFinalYear);
   const [savedAt, setSavedAt] = useState(0);
 
+  useEffect(() => {
+    setExamDate(settings.examDate);
+    setEntOphthaInFinalYear(settings.entOphthaInFinalYear);
+  }, [settings.examDate, settings.entOphthaInFinalYear]);
+
   const dirty =
-    examDate !== settings.examDate ||
-    entOphthaInFinalYear !== settings.entOphthaInFinalYear;
+    examDate !== settings.examDate || entOphthaInFinalYear !== settings.entOphthaInFinalYear;
 
   function save() {
     settings.saveAcademics({ examDate, entOphthaInFinalYear });
-    // Date.now() in an event handler is fine. It is only unsafe during render,
-    // where a value that changes every pass makes re-renders unpredictable.
     setSavedAt(Date.now());
   }
 
@@ -59,8 +32,6 @@ export default function AcademicsSettingsPage() {
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 sm:max-w-md">
         <h3 className="mb-4 text-sm font-semibold text-slate-200">Exam date</h3>
-        {/* DateField owns its own dd/mm/yyyy formatting, so this page never
-            touches date strings directly. */}
         <DateField label="Professional exam" value={examDate} onChange={setExamDate} />
       </section>
 
@@ -73,7 +44,6 @@ export default function AcademicsSettingsPage() {
             type="button"
             role="switch"
             aria-checked={entOphthaInFinalYear}
-            aria-label="Examine ENT and Ophthalmology in 3rd MBBS Part 2"
             onClick={() => setEntOphthaInFinalYear((v) => !v)}
             className={`relative h-7 w-12 shrink-0 rounded-full transition ${
               entOphthaInFinalYear ? "bg-teal-500" : "bg-slate-700"
@@ -93,9 +63,7 @@ export default function AcademicsSettingsPage() {
         className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900/40 p-5 transition hover:border-teal-500/40"
       >
         <h3 className="text-sm font-semibold text-slate-200">Exam subjects</h3>
-        <span className="text-slate-500" aria-hidden>
-          →
-        </span>
+        <span className="text-slate-500">→</span>
       </Link>
 
       <div className="sticky bottom-0 flex items-center gap-3 border-t border-slate-800 bg-slate-950/95 py-3">

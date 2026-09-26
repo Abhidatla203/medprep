@@ -1,0 +1,359 @@
+# settings-memory.md
+
+**Project:** medprep · **Path:** C:\Users\abhid\Desktop\medprep
+**Repo:** https://github.com/Abhidatla203/medprep
+**Last updated:** 2026-09-26 (Session 2 — React 19 lint sweep)
+
+**Purpose:** everything a new chat needs to work on SETTINGS and future
+features. Replaces MEMORY.txt (attendance-specific). Paste this at the start
+of a new session.
+
+---
+
+## 0. WHO YOU ARE WORKING WITH
+
+- Owner is a **medical student, not a developer**. Explain in plain English.
+- **ALWAYS GIVE FULL FILE REPLACEMENTS** — complete text, ready to paste.
+  Never diffs, snippets, or "change line 42 to...". Partial edits have
+  repeatedly caused breakage.
+- Start with **copiable PowerShell commands** (Windows), then VS Code steps.
+- Back up before overwriting. Always offer the one-line rollback.
+- **ONE FILE PER MESSAGE** when doing a multi-file sweep, with a test to run
+  before moving on. Big multi-file messages get lost.
+- Stack: Next.js **16.3.5** (Turbopack) · React **19** · TypeScript ·
+  Tailwind **v4** · localStorage only, no backend.
+
+### 0a. ⚠ VS CODE PASTE FAILURES — KNOWN ISSUE
+
+Three times in Session 2 a Ctrl+A / Ctrl+V / Ctrl+S in VS Code **did not reach
+disk**. Lint kept reporting the old line numbers. Suspected cause: the tab held
+unsaved changes, so Ctrl+S wrote the OLD buffer back over the paste.
+
+**Signature:** file line count unchanged, old code still at the same line.
+
+**Reliable workaround — write the file from PowerShell instead:**
+
+    @'
+    ...file contents...
+    '@ | Set-Content -Path "path\to\file.tsx" -Encoding UTF8
+
+⚠ When doing this, avoid non-ASCII characters in the here-string (en-dashes,
+  ▾ chevrons, ★). Some Windows locales mangle them and a mangled character in
+  JSX is a build error. Use `&#9662;` for ▾ and plain hyphens.
+
+**For large files, use the PowerShell method FIRST rather than after a failed
+paste.** Verify with `Select-String` afterwards.
+
+---
+
+## 1. THE HARD RULES (breaking these has cost whole sessions)
+
+1. **Tailwind v4: never write `bg-[--color-x]`.**
+   That arbitrary-value form generates NO CSS. The element inherits and looks
+   blank. Use real theme utilities: `bg-surface-sunk`, `text-ink-muted`,
+   `border-line`, `rounded-card`, `rounded-field`, `accent-brand`.
+   Caused the invisible Present/Absent buttons AND the unstyled setup page.
+   If you genuinely need arbitrary values, v4 syntax is PARENTHESES —
+   `bg-(--color-safe)` — but every colour here is already a theme token.
+
+2. **Colour must mean ONE thing per screen.**
+   `--color-practical` is the SAME green as `--color-safe`. Category colours
+   are inline hex, matching the ring arcs exactly:
+   - theory `#7c3aed` violet
+   - practical `#ea580c` orange
+   - clinical `#0891b2` cyan
+   Never reintroduce green for "practical".
+
+3. **Never rewrite a file that already works.** If a page passes its checks,
+   touch only what is being fixed.
+
+4. **Attendance store writes are synchronous + notify().** No draft state, so
+   no page-level Save button — use a SaveBar-style confirmation. Silent
+   success looks identical to silent failure.
+   ⚠ The SETTINGS store is different: it uses explicit Save buttons with
+   dirty-checking. Both patterns are correct in their own place.
+
+5. **Mount gate everywhere.** localStorage does not exist on the server. Use
+   `useSyncExternalStore` (see §2), not a useState + useEffect pair.
+
+6. **Dates are dd/mm/yyyy ALWAYS. Times show am/pm. Week starts Monday.**
+   Non-negotiable — the audience is Indian medical students, nobody reads
+   mm/dd. A bare `<input type="date">` renders in BROWSER locale and will show
+   mm/dd/yyyy. Use `components/attendance/DateField.tsx` instead.
+
+---
+
+## 2. ⚠ REACT 19 RULES (Session 2 — 15 lint problems, 9 fixed)
+
+React 19's compiler-backed lint rules are strict. These patterns are now law.
+
+### SM-4 — NO setState INSIDE useEffect. ANYWHERE.
+
+`react-hooks/set-state-in-effect`. Effects run AFTER paint, so setState in an
+effect body renders once with WRONG data and corrects on a second pass. Not
+theoretical: it caused the defaults-flicker on app open and a one-frame
+invalid time in the class sheet.
+
+Three correct replacements, by situation:
+
+| Situation | Fix |
+|---|---|
+| Reading an external store (localStorage, mount gate) | `useSyncExternalStore` |
+| One-shot work (a migration) | module-level function with its own guard |
+| Editing a saved value (a draft) | `useSyncedDraft` — see below |
+| Keeping a dropdown in range | `resolveChoice` — derive, don't store |
+
+### SM-7 — `lib/useSyncedDraft.ts` — THE SHARED HELPER
+
+Created Session 2. Exports three things:
+
+- **`useSyncedDraft(stored, areEqual?)`** — a draft that follows the store.
+  Holds YOUR text while typing, catches up when storage changes elsewhere.
+  Works by comparing against a remembered `seen` value and calling setState
+  DURING render (React discards the pass and re-runs before painting).
+  ⚠ **Pass `jsonEqual` for objects and arrays.** The default `Object.is`
+  compares IDENTITY — a store that rebuilds its object on every read would
+  look "changed" every render and wipe edits as you make them. This is the
+  one way the hook can be silently misused.
+  ⚠ Never compare against the draft itself — the instant you type one
+  character they differ, and it would erase your keystroke.
+
+- **`jsonEqual(a, b)`** — deep compare via JSON. Safe because everything
+  stored is plain JSON (that's what localStorage holds).
+
+- **`resolveChoice(choice, options, fallback)`** — replaces the "snap the
+  dropdown back into range" effect. State holds the raw CHOICE (may be stale,
+  may be null); the effective value is computed each render. An invalid value
+  never becomes a value, so it can never be painted.
+
+⚠ **File lives at `lib/useSyncedDraft.ts`**, NOT `lib/attendance/`. It is used
+  by settings pages too. Import as `@/lib/useSyncedDraft`.
+
+### SM-13 — NO manual useCallback / useMemo the Compiler disputes
+
+`react-hooks/preserve-manual-memoization`. React Compiler memoises
+automatically. When a hand-written dependency list disagrees with what it
+infers, it **skips optimising the ENTIRE component** — far worse than the
+allocation saved. Delete the memo and let the Compiler work.
+
+### Other React 19 rules hit
+
+- **`react-hooks/purity`** — no `Date.now()` / `Math.random()` during render.
+  Use a lazy initialiser: `const [now] = useState(() => Date.now())`.
+  Fine in event handlers.
+- **`react-hooks/refs`** — no reading `ref.current` during render.
+
+---
+
+## 3. THE BOUNDARY — SETUP vs SETTINGS
+
+Decided Session 1. Hold this line; it drifted three times before.
+
+- **/attendance/setup = FACTS ABOUT YOUR COLLEGE.**
+  College hours, working days, the weekly grid, postings, term dates,
+  carry-forward data, export/import. It is a *builder*, needs a full canvas.
+
+- **/settings = YOUR PREFERENCES.**
+  Thresholds, unmarked policy, extra-class defaults, notifications, theme,
+  text size, backup cadence, help, about. It is a *list of rows*.
+
+**Deliberately NOT merged.** A builder crammed into a settings list makes both
+worse. Setup carries a pointer at the bottom: "Looking for attendance targets?
+They live in Settings."
+
+---
+
+## 4. SETTINGS PAGE — AGREED STRUCTURE
+
+Seven top-level rows. Never deeper than two levels; a third level uses a
+SHEET, not another page.
+
+1. **Academics** — profile, university (NTRUHS, locked), year, subjects,
+   term dates, working days, college hours
+2. **Attendance** — default thresholds (theory 75 / practical 80 /
+   clinical 80), per-subject overrides (sparse; blank = default), danger
+   margin, unmarked policy, extra-class default, opening balance, blockouts,
+   postings, timetable
+3. **Notifications** — master toggle, daily reminder, unmarked nudge,
+   danger alert, quiet hours
+4. **Appearance** — theme (no auto dark mode yet), text size, date/time
+   format, week start, density, reduce motion
+5. **Data & Backup** — export, import (must preserve entry ids), last backup,
+   storage used, reset (destructive, bottom, confirm)
+6. **Help** — quick start, FAQ, standings glossary, report a bug
+7. **About** — version, what's new, licences, hidden developer unlock
+   (tap version 7 times)
+
+Later, without disturbing the order: Study & Learning (row 3 when the question
+bank ships), Privacy & Security, Accessibility, Language & Region.
+
+**Destructive actions obey one shape everywhere:** red text, bottom of its
+section, separated by a gap, always a confirm step, never beside a harmless one.
+
+---
+
+## 5. ⚠ WHAT ALREADY EXISTS UNDER /settings (SM-6)
+
+Discovered Session 2. **`/settings` is NOT greenfield.** These exist:
+
+    app/settings/profile/page.tsx            name, photo, birthday, year
+    app/settings/profile/PhotoCropper.tsx    crop UI (2 lint errors, unfixed)
+    app/settings/academics/page.tsx          exam date, ENT/Ophtha toggle
+    app/settings/academics/subjects/page.tsx per-year exam subjects
+    app/store/settings.tsx                   the settings store + provider
+
+**SM-12 — there is NO `app/settings/page.tsx`.** All of the above are orphan
+routes with no menu in front of them. Building that index shell is the next
+session's main job.
+
+⚠ Note the settings pages use a DIFFERENT dark palette from the attendance
+  module — see SM-10.
+
+---
+
+## 6. THE SETTINGS STORE — `app/store/settings.tsx`
+
+Rewritten Session 2. Key facts:
+
+- **ONE state object**, not twelve useState calls. Previously `persist()` took
+  **twelve positional arguments** and all twelve setters had to pass them in
+  the right order — 144 positional args, any two swappable without any tool
+  catching it. Now `commit({ field: value })`, a named partial patch.
+- **Loads during render**, not in an effect, gated by `useSyncExternalStore`
+  for client detection. This removed the defaults-flicker on app open.
+- **Two storage keys**, both written on every save:
+  - `medprep.settings.v1` — full record
+  - `medprep.profile.v1` — legacy projection, year stored as "1".."4"
+- `loadStored()` falls back through every historical format: legacy year
+  codes, single joined `name` string, missing customExamSubjects keys.
+  Each field checked independently so one corrupt field costs only itself.
+- `covered` is session-only, never persisted.
+- `normalizeExamMap` enforces: a subject may be examined in ONE year only,
+  earlier years win.
+
+### ⚠ SM-8 — THE PHOTO QUOTA BOMB (highest-risk open item)
+
+`photo` is a base64 data URL written into **BOTH** storage keys — stored
+twice. A 2 MB photo becomes ~5.5 MB of storage and exceeds the ~5 MB
+localStorage quota. `persist()` catches and **swallows** the error, so **every
+setting silently stops saving** with no error anywhere. Fix by resizing the
+photo before storing, and/or dropping it from PROFILE_KEY.
+
+---
+
+## 7. VOCABULARY — USE THESE EXACT WORDS
+
+Five standings, never percentages in the resting view:
+**On track · Watch · Behind · Well behind · Critical**
+
+Header counts must be OUTSTANDING ACTIONS ("5 unmarked"), never scores.
+A number in a header should be drivable to zero by doing something.
+
+---
+
+## 8. OPEN ITEMS
+
+### Lint — remaining after Session 2 (6 errors, 3 warnings)
+
+| Pattern | File | Fix | Risk |
+|---|---|---|---|
+| B | `app/attendance/components/MarkList.tsx:542` | `resolveChoice` | low |
+| B | `app/attendance/setup/DataPanel.tsx:199` | `resolveChoice` + drop `saved` from useMemo deps (line 204) | low |
+| C | `app/attendance/page.tsx:223` | delete the `useCallback` | none |
+| D | `app/page.tsx:22` | lazy useState for `Date.now()` | low |
+| E | `app/settings/profile/PhotoCropper.tsx:26` | setState in effect | medium |
+| E | `app/settings/profile/PhotoCropper.tsx:116` | ref read during render | medium |
+
+PhotoCropper is the only non-mechanical one: the effect resets zoom/offset on
+a new file while `size()` reads the image ref to compute the crop frame. The
+two are entangled; needs the canvas logic understood before touching.
+
+**SM-14 — `DEFAULT_THRESHOLDS` in `calculate.ts:51` is flagged unused.
+DO NOT DELETE IT.** It is the constant the settings thresholds page will
+consume. The warning disappears the moment it is wired up.
+
+`AttendanceRing.tsx:115` — `tone` unused. Safe to delete that line.
+
+### Architecture
+
+- **SM-1 — migrations run in the wrong place.** `runMigrations()` is called in
+  `app/attendance/page.tsx` only. A student whose first stop is /settings reads
+  pre-migration data. Proper home is the root layout. `layout.tsx` also has an
+  outstanding font issue — fix both in one pass when the settings shell is built.
+- **Duplicate attendance settings screen.** `app/settings/attendance/page.tsx`
+  may still exist and may still read the deleted `targetPercent`. One screen
+  survives; the other redirects. Resolve before building Attendance settings.
+- **Thresholds have nowhere to live.** The real gap, and the reason Attendance
+  should be the first settings section built.
+
+### UI / polish
+
+- **SM-9** — DateField's mask does not preserve caret position on mid-string
+  edits (the caret jumps to the end). Accepted trade-off: fixing it properly
+  means measuring digit offsets and restoring selection by hand. Dates are
+  typed left-to-right or picked from the calendar.
+- **SM-10 — TWO DARK PALETTES IN THE APP.** `DateField.tsx` uses
+  `neutral-*` / `emerald-*`; the settings pages use `slate-*` / `teal-*`; the
+  attendance module uses theme tokens (`ink`, `surface`, `line`, `brand`).
+  Three languages for the same thing. Unify when building the settings shell.
+- **SM-11** — `TermPanel.tsx` still uses native `<input type="date">`, so it
+  renders in browser locale, not dd/mm/yyyy. Now a one-line swap to
+  `DateField`, which handles the mask properly.
+- **SM-15 — `DataPanel.tsx` IS STILL FULL OF BROKEN TAILWIND.** Roughly thirty
+  `bg-[--color-*]` / `text-[--color-*]` / `rounded-[--radius-field]` classes,
+  all generating no CSS. That panel has been rendering unstyled since it was
+  written. Also uses `flex-[2]` (should be `flex-2`). Fix in the same pass as
+  the Pattern B lint error, since the file has to be opened anyway.
+- **SM-5** — `w-0.75` equals 3px only while the Tailwind spacing scale stays
+  on its 4px base. The category rails in setup depend on this.
+
+---
+
+## 9. SESSION LOG
+
+### 2026-09-26 — Session 1 (settings planning)
+- Mapped all 13 possible submenus, trimmed to the 7 in §4.
+- Decided the setup/settings boundary (§3). Chose NOT to merge.
+- Rewrote `app/attendance/setup/page.tsx`: all `bg-[--color-*]` replaced with
+  real utilities; category colours moved to inline hex; `minutesBetween()`
+  helper; body scroll lock; `role="dialog"` + `aria-modal` on sheets;
+  `role="alert"` on errors; Settings pointer line. No logic changed.
+- Updated `app/attendance/page.tsx`: Settings link, `aria-live` on the
+  migration note, aria-label on the unmarked chip.
+
+### 2026-09-26 — Session 2 (React 19 lint sweep)
+Started at **15 lint problems**, ended at **9**. Pattern A fully cleared.
+
+- **Created `lib/useSyncedDraft.ts`** — `useSyncedDraft`, `jsonEqual`,
+  `resolveChoice`. ⚠ Initially created in the wrong folder
+  (`lib/attendance/`), causing a module-not-found; moved to `lib/`.
+- **`app/settings/profile/page.tsx`** — 6 drafts → `useSyncedDraft`.
+- **`app/settings/academics/page.tsx`** — 2 drafts → `useSyncedDraft`.
+- **`app/settings/academics/subjects/page.tsx`** — object draft →
+  `useSyncedDraft` + `jsonEqual`. First use of the deep comparison.
+- **`app/attendance/setup/TermPanel.tsx`** — drafts → `useSyncedDraft`;
+  ~20 broken Tailwind classes fixed; `useCallback` removed.
+  ⚠ Took three attempts — VS Code paste kept not reaching disk. Fixed via
+  PowerShell here-string.
+- **`components/attendance/DateField.tsx`** — two passes:
+  1. draft sync during render instead of an effect
+  2. **a real dd/mm/yyyy input mask.** The field previously accepted ANY text
+     and only validated on blur — it happily held "2489612329473", thirteen
+     digits, and never punctuated as you typed. Now: digits only, slashes
+     inserted automatically, hard cap at 8 digits, auto-commit on the 8th,
+     paste re-masked.
+     ⚠ No trailing slash is ever auto-added — "25" does NOT become "25/".
+     Doing so makes backspace impossible (delete the slash, the mask puts it
+     straight back). Slashes only appear once the digit after them exists.
+- **`app/store/settings.tsx`** — twelve useState → one state object; twelve
+  positional persist args → one named patch; load moved from an effect into
+  render via `useSyncExternalStore`. ~470 lines → ~330. Removed the
+  defaults-flicker on app open.
+
+**Next up:**
+1. Finish the lint sweep — Patterns B, C, D, E (§8). Fold SM-15 into the
+   DataPanel fix.
+2. Build the `/settings` index shell, the 7 rows of §4, around the pages that
+   already exist (§5). Fix SM-1 and SM-10 in the same pass.
+3. Then the Attendance settings section, so thresholds finally have a home
+   and SM-14 resolves itself.

@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 
 // =============================================================================
 // app/attendance/components/WeekStrip.tsx
 // -----------------------------------------------------------------------------
 //   ROWS    = days  (one per working day, fixed height)
-//   COLUMNS = time  (segments between boundaries, width ∝ duration)
+//   COLUMNS = time  (segments between boundaries, width âˆ duration)
 //
 // WHY DAYS ARE ROWS: it matches the printed college timetable, it sends overflow
 // SIDEWAYS instead of making the strip taller (the variable axis is time), the
@@ -17,34 +17,34 @@
 //   2. NO PERCENTAGES. Ever. A figure here gets read as a standing.
 //   3. STATUS OWNS THE FILL. Class type rides on a stripe and a letter.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  TWO ANCHORS — compact is TODAY, overlay is BROWSE
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  TWO ANCHORS â€” compact is TODAY, overlay is BROWSE
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //
-//  COMPACT CARD → pinned to the week containing TODAY. Permanently. It is not
+//  COMPACT CARD â†’ pinned to the week containing TODAY. Permanently. It is not
 //    navigable and it cannot be left. A resting instrument that shows an
 //    arbitrary past week because of something the user did a minute ago is
-//    lying about "now" — and this strip sits directly above the marking list,
+//    lying about "now" â€” and this strip sits directly above the marking list,
 //    where "now" is the entire question.
 //
-//  OVERLAY → browseAnchor, which exists ONLY while expanded and is thrown away
+//  OVERLAY â†’ browseAnchor, which exists ONLY while expanded and is thrown away
 //    on close. History is a thing you go and look at, then come back from.
 //    Week changes in the overlay NEVER call onSelectDay, so the attendance
 //    page (MarkList, selectedDate) stays on the current week.
 //
-//  ⚠ DO NOT "simplify" these back into one anchor. That WAS one anchor, and
+//  âš  DO NOT "simplify" these back into one anchor. That WAS one anchor, and
 //    the bug it produced is exactly this note.
 //
 //  LONG-PRESS (450ms, 10px tolerance) opens the overlay. Chevrons are gone
-//    from the compact card — they are a desktop habit. Swipe-to-change-week
+//    from the compact card â€” they are a desktop habit. Swipe-to-change-week
 //    lives ONLY in the overlay, with the week following the finger.
 //
 //  TIMES LIVE ON THE RAIL, NOT ON EVERY TILE.
-//    • start time at the LEFT edge of every column a class begins in
-//    • end time at the RIGHT edge ONLY where a gap follows — because where
+//    â€¢ start time at the LEFT edge of every column a class begins in
+//    â€¢ end time at the RIGHT edge ONLY where a gap follows â€” because where
 //      classes run back-to-back, the next column's start time IS this one's
 //      end, and printing both says the same thing twice
-//    • end time also on the LAST column, since nothing follows it to imply
+//    â€¢ end time also on the LAST column, since nothing follows it to imply
 //      when the day finishes
 // =============================================================================
 
@@ -76,7 +76,7 @@ import { subjectShort } from '@/lib/attendance/curriculum';
 
 
 // -----------------------------------------------------------------------------
-// SECTION 1 — Time helpers (layout arithmetic, not domain logic)
+// SECTION 1 â€” Time helpers (layout arithmetic, not domain logic)
 // -----------------------------------------------------------------------------
 
 function toMinutes(hhmm: string): number {
@@ -85,7 +85,7 @@ function toMinutes(hhmm: string): number {
 }
 
 /**
- * ★ ALWAYS CARRIES am/pm. An earlier version printed bare hours to save width —
+ * â˜… ALWAYS CARRIES am/pm. An earlier version printed bare hours to save width â€”
  * headers read "9  10:30  2  3", and "2" is not a time anyone can read at a
  * glance. The meridiem costs four pixels and is non-negotiable.
  */
@@ -116,7 +116,7 @@ function formatDuration(mins: number): string {
 
 /**
  * Local calendar date, never UTC. toISOString() converts to UTC first, so in IST
- * any date computed after 18:30 shifts back a day — "today" would highlight the
+ * any date computed after 18:30 shifts back a day â€” "today" would highlight the
  * wrong row every evening.
  */
 function toISO(d: Date): ISODate {
@@ -126,7 +126,7 @@ function toISO(d: Date): ISODate {
   return `${y}-${m}-${day}`;
 }
 
-/** ⚠ TRAP 4 — Monday is 0 in this codebase. JS getDay() returns 0 for Sunday. */
+/** âš  TRAP 4 â€” Monday is 0 in this codebase. JS getDay() returns 0 for Sunday. */
 function isoToDayIndex(iso: ISODate): DayIndex {
   return ((new Date(`${iso}T00:00:00`).getDay() + 6) % 7) as DayIndex;
 }
@@ -141,7 +141,7 @@ function weekStartFor(iso: ISODate): ISODate {
   return addDays(iso, -isoToDayIndex(iso));
 }
 
-/** "22–27 Sept". Always shown — the overlay navigates, so it must say where. */
+/** "22â€“27 Sept". Always shown â€” the overlay navigates, so it must say where. */
 function formatRange(start: ISODate, end: ISODate): string {
   const s = new Date(`${start}T00:00:00`);
   const e = new Date(`${end}T00:00:00`);
@@ -149,18 +149,18 @@ function formatRange(start: ISODate, end: ISODate): string {
   const endMonth = e.toLocaleDateString(undefined, { month: 'short' });
 
   return s.getMonth() === e.getMonth()
-    ? `${s.getDate()}–${e.getDate()} ${endMonth}`
-    : `${s.getDate()} ${startMonth} – ${e.getDate()} ${endMonth}`;
+    ? `${s.getDate()}â€“${e.getDate()} ${endMonth}`
+    : `${s.getDate()} ${startMonth} â€“ ${e.getDate()} ${endMonth}`;
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 2 — Status and category maps
+// SECTION 2 â€” Status and category maps
 // -----------------------------------------------------------------------------
 
 /**
  * Session status is what was RECORDED. Tile status is what the student should
- * SEE — they differ in exactly one case: an unmarked class that has not happened
+ * SEE â€” they differ in exactly one case: an unmarked class that has not happened
  * yet is "future", not an outstanding action.
  */
 function tileStatusFor(session: Session, today: ISODate): WeekTileStatus {
@@ -193,8 +193,8 @@ const LABEL_CLASS: Record<WeekTileStatus, string> = {
 };
 
 /**
- * ★ SAME COLOURS AS THE RING GRID — purple theory, orange practical, cyan
- *   clinical — so class type means one thing across the whole screen.
+ * â˜… SAME COLOURS AS THE RING GRID â€” purple theory, orange practical, cyan
+ *   clinical â€” so class type means one thing across the whole screen.
  */
 const CATEGORY_STRIPE: Record<ClassCategory, string> = {
   theory: '#7c3aed',
@@ -216,13 +216,13 @@ const CATEGORY_WORD: Record<ClassCategory, string> = {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 3 — Segments
+// SECTION 3 â€” Segments
 //
 // Collect EVERY boundary minute in the week; a SEGMENT is the span between two
 // consecutive boundaries; width is proportional to duration; a session spans
 // every segment it covers.
 //
-// BREAK INFERENCE (spec §7.2): the student NEVER configures break times. A
+// BREAK INFERENCE (spec Â§7.2): the student NEVER configures break times. A
 // segment no working day covers is a break. Consecutive breaks merge. Gaps under
 // 20 minutes are changeover, not lunch.
 // -----------------------------------------------------------------------------
@@ -233,7 +233,7 @@ interface Segment {
   kind: 'class' | 'break';
   startMin: number;
   endMin: number;
-  /** True when at least one session begins exactly here — drives the rail. */
+  /** True when at least one session begins exactly here â€” drives the rail. */
   isSessionStart: boolean;
 }
 
@@ -288,16 +288,16 @@ function buildSegments(sessions: Session[]): Segment[] {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 3b — THE TIME RAIL
+// SECTION 3b â€” THE TIME RAIL
 //
-//   start  → printed at the LEFT edge of any column where a class begins
-//   end    → printed at the RIGHT edge ONLY when the information is not already
+//   start  â†’ printed at the LEFT edge of any column where a class begins
+//   end    â†’ printed at the RIGHT edge ONLY when the information is not already
 //            supplied by the next column
 //
 //   "Not already supplied" means exactly two cases:
 //     a) a BREAK follows. The next start time is after the gap, so it says
 //        nothing about when this block finished.
-//     b) NOTHING follows. Last column of the week — no neighbour to imply it.
+//     b) NOTHING follows. Last column of the week â€” no neighbour to imply it.
 //
 //   Where two class columns touch, the end is DELIBERATELY omitted: "3pm"
 //   printed as the right edge of one column and again as the left edge of the
@@ -326,7 +326,7 @@ function buildRail(segments: Segment[]): RailLabel[] {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 4 — Placing a day's sessions
+// SECTION 4 â€” Placing a day's sessions
 // -----------------------------------------------------------------------------
 
 interface Cell {
@@ -370,7 +370,7 @@ function placeDay(segments: Segment[], daySessions: Session[]): Cell[] {
         span: 1,
         sessions: [],
         key: `b${i}`,
-        label: `${formatTime(seg.startMin)} – ${formatTime(seg.endMin)}`,
+        label: `${formatTime(seg.startMin)} â€“ ${formatTime(seg.endMin)}`,
       });
       i += 1;
       continue;
@@ -385,15 +385,15 @@ function placeDay(segments: Segment[], daySessions: Session[]): Cell[] {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 5 — Gestures
+// SECTION 5 â€” Gestures
 //
-// LONG PRESS (compact card only) — opens the expanded view.
+// LONG PRESS (compact card only) â€” opens the expanded view.
 //   Fires at 450ms. Cancelled by any movement over 10px, so scrolling the strip
 //   sideways never expands it. The click that lands after the finger lifts is
 //   swallowed in the capture phase, otherwise expanding would also re-select
 //   whichever day was under the thumb.
 //
-// SWIPE (expanded view only) — changes week, with the grid following the finger.
+// SWIPE (expanded view only) â€” changes week, with the grid following the finger.
 // -----------------------------------------------------------------------------
 
 const LONG_PRESS_MS = 450;
@@ -440,13 +440,13 @@ function markHintSeen(): void {
     window.localStorage.setItem(HINT_KEY, '1');
     window.dispatchEvent(new Event(HINT_EVENT));
   } catch {
-    // private mode — hint will keep showing, which is fine
+    // private mode â€” hint will keep showing, which is fine
   }
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 6 — Model
+// SECTION 6 â€” Model
 // -----------------------------------------------------------------------------
 
 interface DayModel {
@@ -465,13 +465,13 @@ interface WeekModel {
   isCurrentWeek: boolean;
   unmarkedCount: number;
   outsideTerm: boolean;
-  /** Expanded-view tallies. Never shown in the compact card — no numbers there. */
+  /** Expanded-view tallies. Never shown in the compact card â€” no numbers there. */
   tally: Record<WeekTileStatus, number>;
 }
 
 /**
  * Built twice: once for the compact card (anchor = today) and once for the
- * overlay (anchor = browseAnchor). Same function, two owners — that is the
+ * overlay (anchor = browseAnchor). Same function, two owners â€” that is the
  * whole point of extracting it.
  */
 function useWeekModel(anchor: ISODate, today: ISODate, revision?: number): WeekModel {
@@ -533,7 +533,7 @@ function useWeekModel(anchor: ISODate, today: ISODate, revision?: number): WeekM
 
 
 // -----------------------------------------------------------------------------
-// SECTION 7 — Component
+// SECTION 7 â€” Component
 // -----------------------------------------------------------------------------
 
 export interface WeekStripProps {
@@ -547,8 +547,8 @@ export interface WeekStripProps {
   onSelectDay?: (date: ISODate) => void;
   selectedDate?: ISODate;
   /**
-   * ⚠ Not decorative. The strip reads generated sessions, memoised by
-   *   DataVersion — without this in the dependency list a mark made below would
+   * âš  Not decorative. The strip reads generated sessions, memoised by
+   *   DataVersion â€” without this in the dependency list a mark made below would
    *   not repaint the tile above it.
    */
   revision?: number;
@@ -561,7 +561,7 @@ export default function WeekStrip(props: WeekStripProps) {
 
   const compactModel = useWeekModel(today, today, revision);
 
-  // ⚠ ALL useState CALLS SIT ABOVE ANY CALLBACK THAT TOUCHES THEM.
+  // âš  ALL useState CALLS SIT ABOVE ANY CALLBACK THAT TOUCHES THEM.
   //   React Compiler's immutability lint treats a setter used before its
   //   useState line as a temporal dead zone, even though JS closures would
   //   be fine at runtime. Declare first, close over second.
@@ -586,7 +586,7 @@ export default function WeekStrip(props: WeekStripProps) {
   }, []);
 
   const openExpanded = useCallback(() => {
-    // ★ ALWAYS OPEN ON THIS WEEK. Resuming where you last browsed sounds
+    // â˜… ALWAYS OPEN ON THIS WEEK. Resuming where you last browsed sounds
     //   helpful and is not: reopening into March when it is September reads as
     //   a bug every single time.
     setBrowseAnchor(today);
@@ -673,8 +673,8 @@ export default function WeekStrip(props: WeekStripProps) {
   );
 
   /**
-   * ⚠ CAPTURE PHASE, deliberately. A long press over a day button would
-   *   otherwise ALSO fire that button's onClick when the finger lifts — the
+   * âš  CAPTURE PHASE, deliberately. A long press over a day button would
+   *   otherwise ALSO fire that button's onClick when the finger lifts â€” the
    *   overlay would open and the selected day would change underneath it.
    */
   const onClickCapture = useCallback((e: MouseEvent) => {
@@ -687,16 +687,16 @@ export default function WeekStrip(props: WeekStripProps) {
   // ---- swipe, with the week following the finger ---------------------------
   //
   //  THREE PHASES:
-  //    DRAG   — transform tracks the finger 1:1 while armed, at 0.22 resistance
+  //    DRAG   â€” transform tracks the finger 1:1 while armed, at 0.22 resistance
   //             when not. Resistance instead of a dead stop: a panel that
   //             ignores the finger feels broken; one that pushes back feels
   //             like an edge.
-  //    GLIDE  — past 56px, the week slides fully out (180ms).
-  //    ENTER  — the new week is placed off the OPPOSITE edge with the
+  //    GLIDE  â€” past 56px, the week slides fully out (180ms).
+  //    ENTER  â€” the new week is placed off the OPPOSITE edge with the
   //             transition OFF, then animated to 0. Direction of travel is the
   //             whole message: going back must visibly come from the left.
   //
-  //  ⚠ THE DOUBLE rAF: set position → paint → animate. One frame is not
+  //  âš  THE DOUBLE rAF: set position â†’ paint â†’ animate. One frame is not
   //    enough; React batches, the browser coalesces, and the panel teleports.
 
   const expandedScrollerRef = useRef<HTMLDivElement>(null);
@@ -722,7 +722,7 @@ export default function WeekStrip(props: WeekStripProps) {
       const w = (deckRef.current?.clientWidth ?? 340) * 1.05;
 
       setGliding(true);
-      setDragX(-dir * w); // next week → current content exits left
+      setDragX(-dir * w); // next week â†’ current content exits left
 
       window.setTimeout(() => {
         goToWeek(dir);
@@ -775,7 +775,7 @@ export default function WeekStrip(props: WeekStripProps) {
     const dx = e.clientX - s.x;
     const dy = e.clientY - s.y;
 
-    if (Math.abs(dy) > Math.abs(dx)) return; // vertical → leave it alone
+    if (Math.abs(dy) > Math.abs(dx)) return; // vertical â†’ leave it alone
 
     const armed = dx > 0 ? s.atStart : s.atEnd;
     setDragX(armed ? dx : dx * 0.22);
@@ -929,7 +929,7 @@ export default function WeekStrip(props: WeekStripProps) {
             <CompactLegend />
 
             <p className="mt-2 text-center text-[0.625rem] text-ink-faint">
-              Swipe to change week · tap outside to close
+              Swipe to change week Â· tap outside to close
             </p>
           </div>
         </div>
@@ -940,7 +940,7 @@ export default function WeekStrip(props: WeekStripProps) {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 7b — The grid, shared by both views
+// SECTION 7b â€” The grid, shared by both views
 // -----------------------------------------------------------------------------
 
 function WeekGrid(props: {
@@ -953,9 +953,9 @@ function WeekGrid(props: {
   const { model, today, selectedDate, onSelectDay, expanded } = props;
 
   /**
-   * ★ WIDTH ∝ DURATION. Class segments get fr units equal to their minute count.
+   * â˜… WIDTH âˆ DURATION. Class segments get fr units equal to their minute count.
    *
-   *   Compact floor is 2.75rem — tiles no longer carry times, times live on
+   *   Compact floor is 2.75rem â€” tiles no longer carry times, times live on
    *   the rail. Expanded gets 5rem: there is room, and the tiles carry their
    *   own times there as supplementary detail.
    */
@@ -1050,7 +1050,7 @@ function WeekGrid(props: {
                   return (
                     <div
                       key={`${day.date}-${cell.key}`}
-                      title={`Break · ${cell.label}`}
+                      title={`Break Â· ${cell.label}`}
                       className="flex items-center justify-center"
                       style={{ gridColumn: `span ${cell.span}` }}
                     >
@@ -1095,14 +1095,14 @@ function WeekGrid(props: {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 8 — Compact header
+// SECTION 8 â€” Compact header
 //
-// ★ ONE CONTROL. The arrows are gone; navigation lives in the expanded view.
+// â˜… ONE CONTROL. The arrows are gone; navigation lives in the expanded view.
 //   The compact card cannot leave this week, so a date jump or Today chip
 //   would be a control that does nothing.
 //
 //   Hint visibility is an external store (localStorage), not React state
-//   written from an effect — React Compiler rejects setState-in-effect.
+//   written from an effect â€” React Compiler rejects setState-in-effect.
 // -----------------------------------------------------------------------------
 
 function CompactHeader(props: { model: WeekModel }) {
@@ -1137,7 +1137,7 @@ function CompactHeader(props: { model: WeekModel }) {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 8b — Expanded header
+// SECTION 8b â€” Expanded header
 //
 // Arrows live HERE and nowhere else. In the overlay they are the keyboard /
 // desktop path to a gesture that a mouse cannot perform, and there is room.
@@ -1158,7 +1158,7 @@ function ExpandedHeader(props: {
     <div className="mb-3 shrink-0">
       <div className="flex items-center gap-1">
         <NavButton label="Previous week" onClick={onPrev}>
-          ‹
+          â€¹
         </NavButton>
 
         <div className="relative min-w-0 flex-1">
@@ -1185,7 +1185,7 @@ function ExpandedHeader(props: {
         </div>
 
         <NavButton label="Next week" onClick={onNext}>
-          ›
+          â€º
         </NavButton>
 
         <button
@@ -1194,7 +1194,7 @@ function ExpandedHeader(props: {
           aria-label="Close"
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-base text-ink-muted transition-all active:scale-90 active:bg-surface-sunk"
         >
-          ✕
+          âœ•
         </button>
       </div>
 
@@ -1232,12 +1232,12 @@ function NavButton(props: {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 8c — Shared small parts
+// SECTION 8c â€” Shared small parts
 // -----------------------------------------------------------------------------
 
 function OutsideTermNote() {
   return (
-    <p className="mb-2 shrink-0 rounded-[--radius-field] border border-[--color-watch-line] bg-[--color-watch-soft] px-3 py-2 text-[0.6875rem] leading-relaxed text-[--color-watch]">
+    <p className="mb-2 shrink-0 rounded-field border border-watch-line bg-watch-soft px-3 py-2 text-[0.6875rem] leading-relaxed text-watch">
       Outside your term dates. Anything marked here is saved, but will not count
       towards your attendance.
     </p>
@@ -1245,7 +1245,7 @@ function OutsideTermNote() {
 }
 
 /**
- * ⚠ RULE 2 HOLDS. These are COUNTS, not percentages. A percentage in a week
+ * âš  RULE 2 HOLDS. These are COUNTS, not percentages. A percentage in a week
  *   preview gets read as a standing, and a single bad week would look like a
  *   failing subject.
  */
@@ -1307,7 +1307,7 @@ function CompactLegend() {
               style={{ backgroundColor: CATEGORY_STRIPE[c] }}
               aria-hidden
             />
-            {CATEGORY_LETTER[c]} · {CATEGORY_WORD[c]}
+            {CATEGORY_LETTER[c]} Â· {CATEGORY_WORD[c]}
           </span>
         ))}
       </div>
@@ -1334,9 +1334,9 @@ function LegendDot(props: { className: string; label: string }) {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 9 — One session tile
+// SECTION 9 â€” One session tile
 //
-// ★ TIMES ARE NOT PRINTED HERE IN THE COMPACT VIEW. The times describe the
+// â˜… TIMES ARE NOT PRINTED HERE IN THE COMPACT VIEW. The times describe the
 //   COLUMN, so they live on the rail and are stated once.
 //
 //   In the EXPANDED view the tile does carry its own range, because there the
@@ -1357,10 +1357,10 @@ function SessionTile(props: {
   const startMin = toMinutes(session.start);
   const endMin = toMinutes(session.end);
 
-  const title = `${session.subjectName} · ${CATEGORY_WORD[session.category]} · ${formatTime(
+  const title = `${session.subjectName} Â· ${CATEGORY_WORD[session.category]} Â· ${formatTime(
     startMin,
-  )} – ${formatTime(endMin)} · ${formatDuration(endMin - startMin)}${
-    count > 1 ? ` · counts as ${count}` : ''
+  )} â€“ ${formatTime(endMin)} Â· ${formatDuration(endMin - startMin)}${
+    count > 1 ? ` Â· counts as ${count}` : ''
   }`;
 
   const stripe = {
@@ -1388,7 +1388,7 @@ function SessionTile(props: {
           className="tnum pointer-events-none mt-0.5 w-full text-center text-[0.5625rem] font-medium leading-none opacity-70"
           aria-hidden
         >
-          {formatTimeCompact(startMin)}–{formatTimeCompact(endMin)}
+          {formatTimeCompact(startMin)}â€“{formatTimeCompact(endMin)}
         </span>
       )}
     </>

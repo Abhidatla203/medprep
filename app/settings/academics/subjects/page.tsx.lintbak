@@ -1,45 +1,7 @@
 "use client";
 
-// =============================================================================
-// app/settings/academics/subjects/page.tsx
-// -----------------------------------------------------------------------------
-// Which subjects are examined in which year. Overrides the default curriculum.
-//
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ THIS DRAFT IS AN OBJECT, AND THAT CHANGES THE RULES
-// ═════════════════════════════════════════════════════════════════════════════
-// Every other draft in settings holds a plain string. This one holds an
-// ExamSubjectMap — four years, each with a list of subjects.
-//
-// useSyncedDraft decides "has the stored value changed?" using Object.is by
-// default. For a string that is exactly right. For an OBJECT it asks the wrong
-// question entirely: Object.is compares IDENTITY, not contents.
-//
-//     Object.is({a:1}, {a:1})   →  false   ← same contents, different objects
-//
-// app/store/settings.tsx rebuilds customExamSubjects through normalizeExamMap
-// on save, so the reference changes even when nothing inside it did. With the
-// default comparison, useSyncedDraft would conclude "the store changed!" on
-// essentially every render and reset your draft — you would click Add and
-// watch the subject disappear instantly, with no error anywhere.
-//
-// ★ jsonEqual compares CONTENTS. That is the entire fix, and it is the one way
-//   this hook can be silently misused.
-//
-// ⚠ RULE FOR FUTURE SCREENS: string, number, boolean → default is fine.
-//                            object, array           → pass jsonEqual.
-// ═════════════════════════════════════════════════════════════════════════════
-//
-// ⚠ THE CASCADE. A subject may be examined in ONE year only. Adding Pathology
-//   to 2nd MBBS removes it from 3rd Part 1 and Part 2 automatically, and it
-//   disappears from their dropdowns. Without that rule the same subject would
-//   be counted twice and a student could build a timetable that double-counts
-//   attendance. normalizeExamMap in the store enforces it on save; this page
-//   enforces it live so the UI never shows an impossible state.
-// =============================================================================
-
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { YEARS, type Year } from "../../../data/universities/ntruhs/curriculum";
 import {
   emptyExamMap,
@@ -47,9 +9,7 @@ import {
   useSettings,
   type ExamSubjectMap,
 } from "../../../store/settings";
-import { useSyncedDraft, jsonEqual } from "@/lib/useSyncedDraft";
 
-/** The "pick a subject" dropdown for each year. Pure UI, never persisted. */
 const EMPTY_DRAFT: Record<Year, string> = {
   "1st MBBS": "",
   "2nd MBBS": "",
@@ -59,27 +19,16 @@ const EMPTY_DRAFT: Record<Year, string> = {
 
 export default function ExamSubjectsPage() {
   const settings = useSettings();
-
-  // ★ jsonEqual, NOT the default. See the header note — this is the line that
-  //   stops your edits vanishing as you make them.
-  const [map, setMap] = useSyncedDraft<ExamSubjectMap>(
-    settings.customExamSubjects,
-    jsonEqual,
-  );
-
-  // The four dropdown selections. Local to this screen, never saved.
+  const [map, setMap] = useState<ExamSubjectMap>(settings.customExamSubjects);
   const [draft, setDraft] = useState<Record<Year, string>>(EMPTY_DRAFT);
   const [savedAt, setSavedAt] = useState(0);
 
-  const dirty = !jsonEqual(map, settings.customExamSubjects);
+  useEffect(() => {
+    setMap(settings.customExamSubjects);
+  }, [settings.customExamSubjects]);
 
-  /**
-   * For each year, the subjects already claimed by an EARLIER year.
-   *
-   * Walks the years in order, accumulating as it goes — so Part 2 sees
-   * everything taken by 1st, 2nd and Part 1. Those are then hidden from its
-   * dropdown, making a double-claim impossible rather than merely invalid.
-   */
+  const dirty = JSON.stringify(map) !== JSON.stringify(settings.customExamSubjects);
+
   const takenBefore = useMemo(() => {
     const acc: Record<Year, Set<string>> = {
       "1st MBBS": new Set(),
@@ -89,8 +38,6 @@ export default function ExamSubjectsPage() {
     };
     const seen = new Set<string>();
     YEARS.forEach((year) => {
-      // Snapshot BEFORE adding this year's own subjects — a year does not
-      // block itself.
       acc[year] = new Set(seen);
       (map[year] || []).forEach((s) => seen.add(s));
     });
@@ -100,26 +47,18 @@ export default function ExamSubjectsPage() {
   function add(year: Year) {
     const subject = (draft[year] || "").trim();
     if (!subject) return;
-    // Both guards are belt and braces: the dropdown already excludes these.
     if (takenBefore[year].has(subject)) return;
     if ((map[year] || []).includes(subject)) return;
-
-    // Build a fresh map rather than mutating — mutating state in place means
-    // React sees no change and nothing re-renders.
     const next = emptyExamMap();
     YEARS.forEach((y) => {
       next[y] = [...(map[y] || [])];
     });
     next[year] = [...next[year], subject];
-
-    // ★ The cascade. Claiming a subject for this year strips it from every
-    //   LATER year. Earlier years always win.
     YEARS.forEach((y) => {
       if (YEARS.indexOf(y) > YEARS.indexOf(year)) {
         next[y] = next[y].filter((s) => s !== subject);
       }
     });
-
     setMap(normalizeExamMap(next));
     setDraft((prev) => ({ ...prev, [year]: "" }));
   }
@@ -129,16 +68,10 @@ export default function ExamSubjectsPage() {
       normalizeExamMap({
         ...prev,
         [year]: (prev[year] || []).filter((s) => s !== subject),
-      }),
+      })
     );
   }
 
-  /**
-   * Empty the year's override list.
-   *
-   * An empty list is not "no subjects" — the store reads it as "fall back to
-   * the default curriculum". That is why the button says "Use default".
-   */
   function resetYear(year: Year) {
     setMap((prev) => normalizeExamMap({ ...prev, [year]: [] }));
   }
@@ -155,19 +88,13 @@ export default function ExamSubjectsPage() {
           ← Academics
         </Link>
         <h2 className="mt-3 text-2xl font-bold tracking-tight">Exam subjects</h2>
-        <p className="mt-2 text-sm text-slate-400">
-          Leave a year empty to use the standard curriculum. A subject can only
-          belong to one year.
-        </p>
       </section>
 
       {YEARS.map((year) => {
         const selected = map[year] || [];
-        // Hide anything already claimed earlier, and anything already here.
         const options = settings.allSubjects.filter(
-          (s) => !takenBefore[year].has(s) && !selected.includes(s),
+          (s) => !takenBefore[year].has(s) && !selected.includes(s)
         );
-
         return (
           <section key={year} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
             <div className="flex items-center justify-between gap-3">
@@ -187,7 +114,6 @@ export default function ExamSubjectsPage() {
               <select
                 value={draft[year] ?? ""}
                 onChange={(e) => setDraft((prev) => ({ ...prev, [year]: e.target.value }))}
-                aria-label={`Add a subject to ${year}`}
                 className="min-w-0 flex-1 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
               >
                 <option value="">Subject</option>
@@ -214,8 +140,7 @@ export default function ExamSubjectsPage() {
                     key={s}
                     type="button"
                     onClick={() => remove(year, s)}
-                    aria-label={`Remove ${s} from ${year}`}
-                    className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-300 transition hover:border-red-500/50 hover:text-red-300"
+                    className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-300"
                   >
                     {s} ×
                   </button>

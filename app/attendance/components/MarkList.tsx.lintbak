@@ -1,26 +1,26 @@
-﻿'use client';
+'use client';
 
 // =============================================================================
 // app/attendance/components/MarkList.tsx
 // -----------------------------------------------------------------------------
-// The marking section. This is the daily habit â€” the thing a student opens for
+// The marking section. This is the daily habit — the thing a student opens for
 // ten seconds after their last class and closes again.
 //
 // It sits BELOW the week strip and is the only place marking happens. The strip
 // above is a read-only preview; making it tappable would have given us two
 // marking surfaces, two sets of edge cases, and one shared bug.
 //
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  âš âš  THE BUG THIS REVISION FIXES â€” READ BEFORE WRITING ANY CLASSNAME HERE
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Tapping "Present" made the button go BLANK. Not unstyled â€” blank.
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⚠⚠ THE BUG THIS REVISION FIXES — READ BEFORE WRITING ANY CLASSNAME HERE
+// ═════════════════════════════════════════════════════════════════════════════
+// Tapping "Present" made the button go BLANK. Not unstyled — blank.
 //
 // The cause was this, repeated across every component in the module:
 //
-//     className="bg-[--color-safe] text-white"      â† BROKEN
+//     className="bg-[--color-safe] text-white"      ← BROKEN
 //
 // TAILWIND v4 REMOVED THE `[--var]` BRACKET SHORTHAND. In v3 that was already
-// shaky; in v4 `bg-[--color-safe]` produces NO CSS AT ALL. It fails silently â€”
+// shaky; in v4 `bg-[--color-safe]` produces NO CSS AT ALL. It fails silently —
 // no build warning, no console error, no red squiggle. `text-white` applied
 // perfectly well, so the result was white text on a white button. The mark was
 // saving correctly the whole time; it was simply invisible.
@@ -28,47 +28,56 @@
 // THE FIX, and the rule for this entire module:
 //
 //   Every token in @theme ALREADY GENERATES A REAL UTILITY.
-//     --color-safe       â†’ bg-safe, text-safe, border-safe
-//     --color-ink-muted  â†’ text-ink-muted
-//     --color-line       â†’ border-line
-//     --radius-field     â†’ rounded-field
+//     --color-safe       → bg-safe, text-safe, border-safe
+//     --color-ink-muted  → text-ink-muted
+//     --color-line       → border-line
+//     --radius-field     → rounded-field
 //
 //   So write `bg-safe`, never `bg-[--color-safe]`. The generated utility cannot
 //   silently fail: if the token does not exist, the class does not exist, and
 //   you notice immediately.
 //
 //   If you ever genuinely need an arbitrary value, the v4 syntax is PARENTHESES
-//   â€” `bg-(--color-safe)` â€” not square brackets. But you should not need it
+//   — `bg-(--color-safe)` — not square brackets. But you should not need it
 //   here, because every colour in this app is already a theme token.
 //
-// âš  THE SAME BROKEN PATTERN IS STILL PRESENT IN WeekStrip.tsx, RingGrid.tsx AND
+// ⚠ THE SAME BROKEN PATTERN IS STILL PRESENT IN WeekStrip.tsx, RingGrid.tsx AND
 //   page.tsx. Everything there reading `text-[--color-ink-faint]` is currently
-//   rendering as unstyled default text. Those files are next.
+//   rendering as unstyled default text. Those files are next. (SM-19)
 //
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  â˜… COLOUR CODING â€” THE SECOND FIX
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⚠ NO setState INSIDE useEffect (SM-4)
+// ═════════════════════════════════════════════════════════════════════════════
+// QuickAddSheet used to repair its category selector with an effect after the
+// fact. It is now DERIVED during render via resolveChoice — see the note at
+// the derivation itself in SECTION 5. The two effects that remain in this file
+// are both legitimate: one subscribes to the keyboard, the other locks body
+// scroll. Neither calls setState in its body.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  ★ COLOUR CODING — THE SECOND FIX
+// ═════════════════════════════════════════════════════════════════════════════
 // The buttons were previously grey until tapped, which made a row of unmarked
 // classes look inert. They now carry their meaning at rest AND when selected:
 //
 //   RESTING            SELECTED
-//   green tint, green text    â†’  solid green, white text     Present
-//   red tint, red text        â†’  solid red, white text       Absent
-//   plain grey, small         â†’  solid grey, struck through   Cancelled
+//   green tint, green text    →  solid green, white text     Present
+//   red tint, red text        →  solid red, white text       Absent
+//   plain grey, small         →  solid grey, struck through   Cancelled
 //
 // The tint is deliberately pale. It says "this button means present" without
-// implying anything has been recorded yet â€” an unmarked row must still read as
+// implying anything has been recorded yet — an unmarked row must still read as
 // unmarked at a glance.
 //
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════
 //  FOUR RULES CARRIED IN FROM THE SPEC
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════
 //
 //  1. ONE ROW PER SESSION, WHATEVER THE WEIGHT.
 //     A posting counted as 3 classes is ONE row and ONE tap. The weight lives
 //     in the data; the student marks what they did, not what it costs. The week
 //     strip renders the same session as three tiles. Same record, two
-//     renderings â€” that asymmetry is the whole point of the multiplier.
+//     renderings — that asymmetry is the whole point of the multiplier.
 //
 //  2. C IS SMALLER THAN P AND A.
 //     Present and absent are the daily reality. Cancelled is occasional. Equal
@@ -78,7 +87,7 @@
 //  3. NO DEFAULT SELECTION. EVER.
 //     An unmarked row stays visually open. Pre-selecting "present" would be
 //     guessing on the student's behalf about the exact thing the app exists to
-//     record â€” and a wrong guess is invisible until debarment.
+//     record — and a wrong guess is invisible until debarment.
 //
 //  4. NO PERCENTAGES IN THIS COMPONENT.
 //     Not one. Standing belongs to the rings. A figure here would be read as a
@@ -115,7 +124,7 @@ import { resolveChoice } from '@/lib/useSyncedDraft';
 
 
 // -----------------------------------------------------------------------------
-// SECTION 1 â€” Local helpers
+// SECTION 1 — Local helpers
 // -----------------------------------------------------------------------------
 
 const CATEGORY_LABEL: Record<ClassCategory, string> = {
@@ -124,7 +133,7 @@ const CATEGORY_LABEL: Record<ClassCategory, string> = {
   clinical: 'Clinical',
 };
 
-/** Local calendar date. Never toISOString() â€” that shifts the day in IST. */
+/** Local calendar date. Never toISOString() — that shifts the day in IST. */
 function toISO(d: Date): ISODate {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -138,7 +147,7 @@ function addDays(iso: ISODate, n: number): ISODate {
   return toISO(d);
 }
 
-/** âš  TRAP 4 â€” Monday is 0 here, not Sunday. */
+/** ⚠ TRAP 4 — Monday is 0 here, not Sunday. */
 function isoToDayIndex(iso: ISODate): number {
   return (new Date(`${iso}T00:00:00`).getDay() + 6) % 7;
 }
@@ -147,7 +156,7 @@ function weekStartFor(iso: ISODate): ISODate {
   return addDays(iso, -isoToDayIndex(iso));
 }
 
-/** "Monday, 22 September" â€” long form, because this is the section's anchor. */
+/** "Monday, 22 September" — long form, because this is the section's anchor. */
 function formatDayHeading(iso: ISODate): string {
   const d = new Date(`${iso}T00:00:00`);
   return `${DAY_NAMES[isoToDayIndex(iso)]}, ${d.getDate()} ${d.toLocaleDateString(
@@ -156,7 +165,7 @@ function formatDayHeading(iso: ISODate): string {
   )}`;
 }
 
-/** "9am â€“ 10am". 12-hour, because nobody says "fourteen thirty" out loud. */
+/** "9am – 10am". 12-hour, because nobody says "fourteen thirty" out loud. */
 function formatRange(start: string, end: string): string {
   const fmt = (t: string) => {
     const [h, m] = t.split(':').map(Number);
@@ -166,12 +175,12 @@ function formatRange(start: string, end: string): string {
       ? `${h12}${suffix}`
       : `${h12}:${String(m).padStart(2, '0')}${suffix}`;
   };
-  return `${fmt(start)} â€“ ${fmt(end)}`;
+  return `${fmt(start)} – ${fmt(end)}`;
 }
 
 
 // -----------------------------------------------------------------------------
-// SECTION 2 â€” Button styling
+// SECTION 2 — Button styling
 //
 // Kept as plain lookup tables rather than inline ternaries so the broken-class
 // bug cannot creep back in unnoticed: every string here is a REAL generated
@@ -189,7 +198,7 @@ const CANCELLED_OFF = 'border-line bg-surface text-ink-faint hover:border-line-s
 
 
 // -----------------------------------------------------------------------------
-// SECTION 3 â€” Component
+// SECTION 3 — Component
 // -----------------------------------------------------------------------------
 
 export interface MarkListProps {
@@ -225,7 +234,7 @@ export default function MarkList(props: MarkListProps) {
     [sessions, selectedDate, today],
   );
 
-  // Days available in the dropdown â€” this week's working days only.
+  // Days available in the dropdown — this week's working days only.
   const weekDays = useMemo(() => {
     const start = weekStartFor(selectedDate);
     return [...settings.college.workingDays]
@@ -236,12 +245,12 @@ export default function MarkList(props: MarkListProps) {
   const isFuture = selectedDate > today;
 
   /**
-   * â˜… THE HOLIDAY ANSWER.
+   * ★ THE HOLIDAY ANSWER.
    *
    * College shut on Tuesday. Without this, that costs six taps and the app nags
    * all evening about classes that never ran. One bulk write, one undo.
    *
-   * Only offered for days that have already happened â€” you cannot know a future
+   * Only offered for days that have already happened — you cannot know a future
    * day was cancelled, and offering it would invite pre-emptive taps that
    * quietly shrink the denominator.
    */
@@ -277,7 +286,7 @@ export default function MarkList(props: MarkListProps) {
           )}
         </div>
 
-        {/* â–¾ jump to another day this week */}
+        {/* ▾ jump to another day this week */}
         <select
           aria-label="Jump to day"
           value={selectedDate}
@@ -291,7 +300,7 @@ export default function MarkList(props: MarkListProps) {
           ))}
         </select>
 
-        {/* ðŸ“… jump to any date.
+        {/* 📅 jump to any date.
             A native date input, deliberately: keyboard accessible, localised
             for free, and on mobile it opens the OS picker the student already
             knows how to use. */}
@@ -301,7 +310,7 @@ export default function MarkList(props: MarkListProps) {
           onClick={() => dateInputRef.current?.showPicker?.()}
           className="btn btn-ghost relative min-h-[2.375rem] w-[2.625rem] px-0 text-base"
         >
-          <span aria-hidden>ðŸ“…</span>
+          <span aria-hidden>📅</span>
           <input
             ref={dateInputRef}
             type="date"
@@ -346,7 +355,7 @@ export default function MarkList(props: MarkListProps) {
         <div className="mt-2.5">
           {allCancelled ? (
             <button onClick={clearDay} className="btn btn-quiet w-full text-sm">
-              Undo â€” unmark this day
+              Undo — unmark this day
             </button>
           ) : (
             <button
@@ -381,9 +390,9 @@ export default function MarkList(props: MarkListProps) {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 4 â€” One class row
+// SECTION 4 — One class row
 //
-// âš  Tapping the SAME button again unmarks. No separate clear control, no long
+// ⚠ Tapping the SAME button again unmarks. No separate clear control, no long
 //   press, no confirmation. Mis-taps are frequent and an undiscovered wrong
 //   mark is expensive, so undo has to be the most obvious gesture available.
 // -----------------------------------------------------------------------------
@@ -417,7 +426,7 @@ function MarkRow(props: { session: Session; isFuture: boolean }) {
           </span>
 
           {/*
-            â˜… Shown ONLY when weight > 1.
+            ★ Shown ONLY when weight > 1.
             Without it, one tap moves the total by three and the student has no
             idea why. With it, the multiplier explains itself at the exact
             moment it matters.
@@ -463,7 +472,7 @@ function MarkRow(props: { session: Session; isFuture: boolean }) {
           type="button"
           onClick={() => mark('not-conducted')}
           aria-pressed={isCancelled}
-          title="Class was cancelled â€” counts as 0 of 0"
+          title="Class was cancelled — counts as 0 of 0"
           className={`min-h-[2.75rem] shrink-0 rounded-field border px-3 text-xs font-medium transition-colors ${
             isCancelled ? CANCELLED_ON : CANCELLED_OFF
           }`}
@@ -474,7 +483,7 @@ function MarkRow(props: { session: Session; isFuture: boolean }) {
 
       {isFuture && session.status === 'unmarked' && (
         <p className="mt-2 text-center text-[0.6875rem] text-ink-faint">
-          Hasn&apos;t happened yet â€” mark it after the class
+          Hasn&apos;t happened yet — mark it after the class
         </p>
       )}
     </div>
@@ -483,20 +492,20 @@ function MarkRow(props: { session: Session; isFuture: boolean }) {
 
 
 // -----------------------------------------------------------------------------
-// SECTION 5 â€” Quick add
+// SECTION 5 — Quick add
 //
 // For a class that was not on the timetable: a guest lecture, a surprise
 // tutorial, a rescheduled practical.
 //
 // DELIBERATELY NARROW:
-//   â€¢ subject â†’ type â†’ present or absent â†’ done
-//   â€¢ NO cancelled option. A class that did not happen and was never scheduled
+//   • subject → type → present or absent → done
+//   • NO cancelled option. A class that did not happen and was never scheduled
 //     is not an event; recording it as 0/0 records nothing.
-//   â€¢ NO timetable edit. This adds ONE class on ONE day. Anything recurring
+//   • NO timetable edit. This adds ONE class on ONE day. Anything recurring
 //     belongs in setup, where it can be reviewed and removed.
 //
-// â˜… IT STORES AS A ONE-OFF EXTRA CLASS with countsTowardDenominator: true.
-//   A class the student actually attended counts both ways â€” that is a normal
+// ★ IT STORES AS A ONE-OFF EXTRA CLASS with countsTowardDenominator: true.
+//   A class the student actually attended counts both ways — that is a normal
 //   class that happened to be unscheduled, not a policy question. The
 //   denominator toggle exists for planned makeup classes, and those are created
 //   in setup where there is room to explain the choice.
@@ -514,16 +523,19 @@ function QuickAddSheet(props: { date: ISODate; onClose: () => void }) {
   );
 
   const [subjectId, setSubjectId] = useState<SubjectId>(subjects[0]?.id ?? '');
-  // The student's RAW choice. null means "not picked yet" - the effective
-  //   category is DERIVED below, once cats is known. Storing the raw choice
-  //   is what lets us honour a valid selection while never letting an
-  //   invalid one reach the screen. (SM-4)
+
+  // ⚠ The student's RAW choice, not the effective one. null means "has not
+  //   picked yet" — the effective category is DERIVED below, once `cats` is
+  //   known. Storing the raw choice is what lets us honour a valid selection
+  //   while never allowing an invalid one to reach the screen.
   const [categoryChoice, setCategoryChoice] = useState<ClassCategory | null>(null);
+
   const [start, setStart] = useState('09:00');
   const [end, setEnd] = useState('10:00');
   const [error, setError] = useState<string | null>(null);
 
-  // Escape closes, and the page behind is locked while the sheet is open.
+  // ✅ A legitimate effect: it subscribes to the keyboard and locks body
+  //    scroll — two external systems — and calls no setState of its own.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -540,18 +552,23 @@ function QuickAddSheet(props: { date: ISODate; onClose: () => void }) {
     [subjectId],
   );
 
-  // DERIVED, not state. A clinical subject has no practical, so changing
+  // ★ DERIVED, not state. A clinical subject has no practical, so changing
   //   subject can strand the selection on a type that no longer exists.
   //
-  //   This used to be a useEffect that snapped the value back into range,
-  //   which renders ONCE WITH THE ILLEGAL VALUE and corrects on a second
-  //   pass. For that frame the Type row really did show a button this
-  //   subject does not offer - and a fast tap on Save in that window would
-  //   file the class under a category the student will never see again.
+  //   This used to be a useEffect that snapped the value back into range:
   //
-  //   A thing derivable from other values is not state; it is a
-  //   calculation. Computing it during render means the invalid value
-  //   never becomes a value at all. (SM-4)
+  //       useEffect(() => {
+  //         if (cats.length > 0 && !cats.includes(category)) setCategory(cats[0]);
+  //       }, [cats, category]);
+  //
+  //   Which renders ONCE WITH THE ILLEGAL VALUE and corrects on a second pass.
+  //   For that frame the Type row really did show a button this subject does
+  //   not offer — and a fast tap on Save in that window would file the class
+  //   under a category the student will never see again.
+  //
+  //   Computing it during render means the invalid value never becomes a
+  //   value at all. A thing derivable from other values is not state; it is a
+  //   calculation. (SM-4)
   const category = resolveChoice(categoryChoice, cats, 'theory');
 
   const save = (status: 'present' | 'absent') => {
@@ -565,7 +582,7 @@ function QuickAddSheet(props: { date: ISODate; onClose: () => void }) {
       subjectId,
       subjectName: subject?.name ?? subjectId,
       countsToward: category,
-      // â˜… An unscheduled class the student attended is a normal class.
+      // ★ An unscheduled class the student attended is a normal class.
       countsTowardDenominator: true,
       startDate: date,
       endDate: date,
@@ -577,7 +594,7 @@ function QuickAddSheet(props: { date: ISODate; onClose: () => void }) {
     });
 
     // The session id is a pure function of the extra's id, the date and the
-    // category â€” so we can mark it immediately, with no regeneration round-trip.
+    // category — so we can mark it immediately, with no regeneration round-trip.
     setMark(extraSessionId(extra.id, date, category), status);
     onClose();
   };
@@ -622,6 +639,8 @@ function QuickAddSheet(props: { date: ISODate; onClose: () => void }) {
                 <button
                   key={c}
                   type="button"
+                  // Sets the RAW choice. `category` above re-derives from it
+                  // on the next render and is always legal.
                   onClick={() => setCategoryChoice(c)}
                   aria-pressed={category === c}
                   className={`seg ${category === c ? 'seg-on' : ''}`}
@@ -660,7 +679,7 @@ function QuickAddSheet(props: { date: ISODate; onClose: () => void }) {
           )}
         </div>
 
-        {/* Save and mark in one action. There is no "add unmarked" â€” if you are
+        {/* Save and mark in one action. There is no "add unmarked" — if you are
             adding a class that was not on your timetable, you were there or you
             were not, and you know which. */}
         <div className="flex shrink-0 gap-2 border-t border-line p-3">

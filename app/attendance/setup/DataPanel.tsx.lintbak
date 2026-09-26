@@ -18,38 +18,9 @@
 // ⚠ TRAP 2 — an excluded subject's opening balance is ignored along with its
 //   sessions. That rule lives in calculate.ts and is not duplicated here.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ TAILWIND v4 — ~30 CLASSES IN THIS FILE GENERATED NOTHING (fixed)
-// ═════════════════════════════════════════════════════════════════════════════
-// This file was written almost entirely in the bracket form:
+// REBUILD v4 — three changes from the previous version:
 //
-//     className="bg-[--color-surface-sunk] text-[--color-ink]"   ← BROKEN
-//
-// Tailwind v4 removed that shorthand. It produces NO CSS AT ALL — no build
-// warning, no console error, no red squiggle. Every background, border and
-// text colour in these sheets has been absent since the file was written; it
-// looked roughly right only because the sheet shell around it did the work.
-//
-// This is the same bug that made the Present button render white-on-white in
-// MarkList. Every token in @theme already generates a real utility:
-//
-//     --color-surface-sunk  →  bg-surface-sunk
-//     --color-ink-muted     →  text-ink-muted
-//     --color-line          →  border-line
-//     --radius-field        →  rounded-field
-//
-// Write those. A generated utility cannot silently fail — if the token does
-// not exist, neither does the class, and you notice immediately. (MEMORY §2)
-//
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ NO setState INSIDE useEffect (SM-4)
-// ═════════════════════════════════════════════════════════════════════════════
-// The category selector used to be repaired by an effect after the fact. It is
-// now DERIVED during render — see the note at the derivation itself.
-//
-// REBUILD v4 — three changes carried forward:
-//
-//   1. TRANSFER USES THE STORE'S OWN BACKUP FUNCTIONS.
+//   1. TRANSFER NOW USES THE STORE'S OWN BACKUP FUNCTIONS.
 //      The old bundle re-created every timetable row through addTimetableEntry(),
 //      which mints FRESH ids. Marks are keyed by session id, which derives from
 //      the parent entry id — so a student could import their own backup and
@@ -77,8 +48,6 @@ import {
   selectableSubjectsFor,
   subjectName,
 } from '@/lib/attendance/curriculum';
-
-import { resolveChoice } from '@/lib/useSyncedDraft';
 
 import {
   exportBackupJSON,
@@ -126,9 +95,6 @@ export default function DataPanel(props: {
   const { year, revision, onSheetChange } = props;
   const [sheet, setSheet] = useState<'balance' | 'transfer' | null>(null);
 
-  // ✅ Legitimate effect: reports upward to an external consumer, no setState
-  //    of its own. The parent uses this to stand its SaveBar down — two pinned
-  //    footers on screen at once looks like a bug.
   useEffect(() => {
     onSheetChange?.(sheet !== null);
   }, [sheet, onSheetChange]);
@@ -156,10 +122,10 @@ export default function DataPanel(props: {
         >
           <span className="chip chip-brand mt-0.5 shrink-0">↩</span>
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-ink">
+            <span className="block text-sm font-semibold text-[--color-ink]">
               Pick up where you left off
             </span>
-            <span className="mt-0.5 block text-sm text-ink-muted">
+            <span className="mt-0.5 block text-sm text-[--color-ink-muted]">
               {balanceCount === 0
                 ? 'Already part-way through the year? Enter your current figures.'
                 : `${balanceCount} ${balanceCount === 1 ? 'entry' : 'entries'} carried forward`}
@@ -173,10 +139,10 @@ export default function DataPanel(props: {
         >
           <span className="chip chip-neutral mt-0.5 shrink-0">⇄</span>
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-ink">
+            <span className="block text-sm font-semibold text-[--color-ink]">
               Export &amp; import
             </span>
-            <span className="mt-0.5 block text-sm text-ink-muted">
+            <span className="mt-0.5 block text-sm text-[--color-ink-muted]">
               Back up everything, or move it to another device.
             </span>
           </span>
@@ -205,10 +171,7 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
   );
 
   const [subjectId, setSubjectId] = useState<SubjectId>(subjects[0]?.id ?? '');
-
-  // ⚠ The RAW choice, not the effective one. null means "hasn't picked".
-  const [categoryChoice, setCategoryChoice] = useState<ClassCategory | null>(null);
-
+  const [category, setCategory] = useState<ClassCategory>('theory');
   const [mode, setMode] = useState<'counts' | 'percent'>('counts');
 
   const [conducted, setConducted] = useState('');
@@ -218,7 +181,6 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ Legitimate effect: subscribes to the keyboard, calls nothing but a prop.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -230,28 +192,15 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
     [subjectId],
   );
 
-  // ★ DERIVED, not state. A clinical subject has no practical, so changing
-  //   subject can strand the selection on a type that no longer exists.
-  //
-  //   This used to be an effect that snapped the value back into range — which
-  //   renders ONCE WITH THE ILLEGAL VALUE and corrects on a second pass. The
-  //   consequence here is worse than cosmetic: for that frame, a Save would
-  //   write the opening balance into a category this subject does not have,
-  //   where it would never be displayed again. Deriving during render means
-  //   the invalid value never exists. (SM-4)
-  const category = resolveChoice(categoryChoice, cats, 'theory');
+  // Keep the selected category legal when the subject changes. A clinical
+  // subject has no practical, and a stale selection would silently write a
+  // balance into a category that will never be displayed.
+  useEffect(() => {
+    if (cats.length > 0 && !cats.includes(category)) setCategory(cats[0]);
+  }, [cats, category]);
 
   const existing: Balance | null = useMemo(
-    () => {
-      // ⚠ `saved` is a deliberate cache-buster, not an accident. Saving writes
-      //   straight to the store, and this memo must re-read afterwards or the
-      //   "Already carried forward" line shows the pre-save figures. The void
-      //   makes the dependency explicit — same idiom as `void revision`
-      //   elsewhere in this module — and silences exhaustive-deps honestly
-      //   rather than by deleting a dependency that is genuinely needed.
-      void saved;
-      return subjectId ? getOpeningBalance(year, subjectId, category) : null;
-    },
+    () => (subjectId ? getOpeningBalance(year, subjectId, category) : null),
     [year, subjectId, category, saved],
   );
 
@@ -326,7 +275,7 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
       onSave={handleSave}
       saveLabel="Add balance"
     >
-      <p className="rounded-field border border-brand-line bg-brand-soft px-4 py-3 text-sm text-brand-ink">
+      <p className="rounded-[--radius-field] border border-[--color-brand-line] bg-[--color-brand-soft] px-4 py-3 text-sm text-[--color-brand-ink]">
         Enter what your college register says today. Everything you mark from now
         on is added on top — nothing you type here appears as a fake class.
       </p>
@@ -348,7 +297,7 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
           {cats.map((c) => (
             <button
               key={c}
-              onClick={() => { setCategoryChoice(c); setSaved(null); }}
+              onClick={() => { setCategory(c); setSaved(null); }}
               aria-pressed={category === c}
               className={`seg ${category === c ? 'seg-on' : ''}`}
             >
@@ -359,10 +308,10 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
       </L>
 
       {existing && existing.conducted > 0 && (
-        <div className="flex items-center justify-between rounded-field border border-line bg-surface-sunk px-4 py-3">
-          <span className="text-sm text-ink-soft">
+        <div className="flex items-center justify-between rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3">
+          <span className="text-sm text-[--color-ink-soft]">
             Already carried forward:{' '}
-            <span className="tnum font-semibold text-ink">
+            <span className="tnum font-semibold text-[--color-ink]">
               {existing.attended}/{existing.conducted}
             </span>
           </span>
@@ -425,15 +374,15 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
       </div>
 
       {derived && derived.conducted > 0 && (
-        <div className="rounded-field border border-line bg-surface-sunk px-4 py-3 text-sm text-ink-soft">
+        <div className="rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3 text-sm text-[--color-ink-soft]">
           <p>
             Recording{' '}
-            <span className="tnum font-semibold text-ink">
+            <span className="tnum font-semibold text-[--color-ink]">
               {derived.attended} of {derived.conducted}
             </span>{' '}
             — {displayPercent(derived.attended, derived.conducted)}%
           </p>
-          <p className="mt-1 text-ink-muted">
+          <p className="mt-1 text-[--color-ink-muted]">
             {CATEGORY_LABEL[category]} needs {threshold}%
             {isCustom ? ' (your setting)' : ' (default)'}.
           </p>
@@ -441,12 +390,12 @@ function OpeningBalanceSheet(props: { year: AcademicYear; onClose: () => void })
       )}
 
       {saved && (
-        <p className="rounded-field border border-safe-line bg-safe-soft px-4 py-3 text-sm text-safe">
+        <p className="rounded-[--radius-field] border border-[--color-safe-line] bg-[--color-safe-soft] px-4 py-3 text-sm text-[--color-safe]">
           ✓ {saved}
         </p>
       )}
       {error && (
-        <p className="rounded-field border border-critical-line bg-critical-soft px-4 py-3 text-sm text-critical">
+        <p className="rounded-[--radius-field] border border-[--color-critical-line] bg-[--color-critical-soft] px-4 py-3 text-sm text-[--color-critical]">
           {error}
         </p>
       )}
@@ -506,8 +455,6 @@ function TransferSheet(props: { onClose: () => void }) {
       a.href = url;
       a.download = `medprep-attendance-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
-      // Revoked immediately: the download has already been handed to the
-      // browser, and leaving it alive holds the whole blob in memory.
       URL.revokeObjectURL(url);
       setReport('Exported. Keep the file somewhere you will find it again.');
     } catch {
@@ -549,20 +496,18 @@ function TransferSheet(props: { onClose: () => void }) {
         onSave={confirmImport}
         saveLabel="Replace my data"
       >
-        <p className="rounded-field border border-critical-line bg-critical-soft px-4 py-3 text-sm text-critical">
+        <p className="rounded-[--radius-field] border border-[--color-critical-line] bg-[--color-critical-soft] px-4 py-3 text-sm text-[--color-critical]">
           Importing <span className="font-semibold">replaces</span> your current
           attendance data. It is not merged, and it cannot be undone.
         </p>
 
-        {/* Naming the exact counts is the point. "Your data will be replaced"
-            is abstract; "31 classes, 4 postings, 212 marks" is a decision. */}
-        <div className="rounded-field border border-line bg-surface-sunk px-4 py-3 text-sm text-ink-soft">
+        <div className="rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3 text-sm text-[--color-ink-soft]">
           About to be replaced:{' '}
-          <span className="tnum font-semibold text-ink">{stats.entries}</span>{' '}
+          <span className="tnum font-semibold text-[--color-ink]">{stats.entries}</span>{' '}
           weekly {stats.entries === 1 ? 'class' : 'classes'},{' '}
-          <span className="tnum font-semibold text-ink">{stats.posts}</span>{' '}
+          <span className="tnum font-semibold text-[--color-ink]">{stats.posts}</span>{' '}
           {stats.posts === 1 ? 'posting' : 'postings'},{' '}
-          <span className="tnum font-semibold text-ink">{stats.marks}</span>{' '}
+          <span className="tnum font-semibold text-[--color-ink]">{stats.marks}</span>{' '}
           {stats.marks === 1 ? 'mark' : 'marks'}.
         </div>
 
@@ -575,13 +520,13 @@ function TransferSheet(props: { onClose: () => void }) {
 
   return (
     <Sheet title="Export & import" onClose={onClose}>
-      <div className="rounded-field border border-line bg-surface-sunk px-4 py-3 text-sm text-ink-soft">
+      <div className="rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3 text-sm text-[--color-ink-soft]">
         Currently stored:{' '}
-        <span className="tnum font-semibold text-ink">{stats.entries}</span>{' '}
+        <span className="tnum font-semibold text-[--color-ink]">{stats.entries}</span>{' '}
         weekly {stats.entries === 1 ? 'class' : 'classes'},{' '}
-        <span className="tnum font-semibold text-ink">{stats.posts}</span>{' '}
+        <span className="tnum font-semibold text-[--color-ink]">{stats.posts}</span>{' '}
         {stats.posts === 1 ? 'posting' : 'postings'},{' '}
-        <span className="tnum font-semibold text-ink">{stats.marks}</span>{' '}
+        <span className="tnum font-semibold text-[--color-ink]">{stats.marks}</span>{' '}
         {stats.marks === 1 ? 'mark' : 'marks'}.
       </div>
 
@@ -589,7 +534,7 @@ function TransferSheet(props: { onClose: () => void }) {
         ↓ Export to a file
       </button>
 
-      <div className="border-t border-line pt-5">
+      <div className="border-t border-[--color-line] pt-5">
         <L label="Import a file">
           <button
             onClick={() => fileRef.current?.click()}
@@ -605,15 +550,13 @@ function TransferSheet(props: { onClose: () => void }) {
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void handleFile(f);
-              // Clear it: choosing the SAME file twice fires no change event,
-              // and the import would silently do nothing the second time.
               e.target.value = '';
             }}
           />
         </L>
 
-        <p className="mt-3 text-sm text-ink-muted">
-          <span className="font-medium text-ink-soft">
+        <p className="mt-3 text-sm text-[--color-ink-muted]">
+          <span className="font-medium text-[--color-ink-soft]">
             Importing replaces what you have.
           </span>{' '}
           You will be asked to confirm first. Class ids are preserved, so your
@@ -622,12 +565,12 @@ function TransferSheet(props: { onClose: () => void }) {
       </div>
 
       {report && (
-        <p className="rounded-field border border-safe-line bg-safe-soft px-4 py-3 text-sm text-safe">
+        <p className="rounded-[--radius-field] border border-[--color-safe-line] bg-[--color-safe-soft] px-4 py-3 text-sm text-[--color-safe]">
           ✓ {report}
         </p>
       )}
       {error && (
-        <p className="rounded-field border border-critical-line bg-critical-soft px-4 py-3 text-sm text-critical">
+        <p className="rounded-[--radius-field] border border-[--color-critical-line] bg-[--color-critical-soft] px-4 py-3 text-sm text-[--color-critical]">
           {error}
         </p>
       )}
@@ -641,9 +584,7 @@ function TransferSheet(props: { onClose: () => void }) {
 //
 // Uses .sheet / .sheet-head / .sheet-body / .sheet-foot from globals.css: flex
 // column, footer as a SIBLING of the scroll area. That structure is what keeps
-// the save button on screen however tall the content grows — a `sticky` footer
-// INSIDE the scroll area travels out of the viewport once content exceeds the
-// sheet's max height, which is how this broke the first time.
+// the save button on screen however tall the content grows.
 // =============================================================================
 
 function Sheet(props: {
@@ -659,7 +600,7 @@ function Sheet(props: {
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div className="sheet-scrim" onClick={onClose} aria-hidden />
       <div className="relative z-10 w-full max-w-2xl px-3 pb-3">
-        <div className="sheet" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="sheet">
           <div className="sheet-head px-5 pb-4 pt-4">
             <div className="sheet-grip mb-4" aria-hidden />
             <p className="display text-xl">{title}</p>
@@ -672,10 +613,7 @@ function Sheet(props: {
               {onSave ? 'Cancel' : 'Done'}
             </button>
             {onSave && (
-              // flex-2, not flex-[2]. The canonical form; the bracket version
-              // is the same family of syntax that silently produced nothing
-              // above.
-              <button onClick={onSave} className="btn btn-primary flex-2">
+              <button onClick={onSave} className="btn btn-primary flex-[2]">
                 {saveLabel ?? 'Save'}
               </button>
             )}

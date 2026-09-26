@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 // =============================================================================
 // app/attendance/setup/SaveBar.tsx
@@ -9,16 +9,16 @@
 // store.ts writes to localStorage synchronously and calls notify(). By the time
 // a sheet closes, the data is already on disk.
 //
-// What was missing was CONFIRMATION — silent success is indistinguishable from
+// What was missing was CONFIRMATION â€” silent success is indistinguishable from
 // silent failure. This bar flashes a timestamped "Saved" on every write, states
 // the resting truth otherwise, and offers Done as the real primary action.
 //
-// ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ TWO LAYOUT RULES THIS FILE EXISTS TO GET RIGHT
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  âš  TWO LAYOUT RULES THIS FILE EXISTS TO GET RIGHT
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //
 //  1. FULLY OPAQUE. It was bg-surface/92 with a backdrop-blur. Frosted glass
-//     looks refined over a photo and looks broken over dense text — the cards
+//     looks refined over a photo and looks broken over dense text â€” the cards
 //     behind it stayed legible enough to read, which made the bar seem like a
 //     rendering fault rather than a surface. A status bar carrying a primary
 //     action must be a solid object.
@@ -32,7 +32,7 @@
 //
 //  Positioning uses bottom offsets rather than padding: bottom-[4.5rem] clears
 //  the mobile tab bar, bottom-4 on desktop where that bar is hidden.
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -79,28 +79,28 @@ export default function SaveBar(props: {
         <div className="pointer-events-none fixed inset-x-0 bottom-[4.5rem] z-30 md:bottom-4">
           <div className="mx-auto w-full max-w-5xl px-4">
             <div
-              className="pointer-events-auto flex items-center gap-3 rounded-[--radius-card] border border-[--color-line-strong] bg-[--color-surface] p-2.5 pl-4 shadow-[--shadow-lift]"
+              className="pointer-events-auto flex items-center gap-3 rounded-card border border-line-strong bg-surface p-2.5 pl-4 shadow-lift"
               role="status"
               aria-live="polite"
             >
               <span className="min-w-0 flex-1">
                 {justSaved ? (
-                  <span className="flex items-center gap-2 text-sm font-medium text-[--color-safe]">
+                  <span className="flex items-center gap-2 text-sm font-medium text-safe">
                     <span
-                      className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[--color-safe-soft] text-[11px]"
+                      className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-safe-soft text-[11px]"
                       aria-hidden
                     >
-                      ✓
+                      âœ“
                     </span>
                     Saved
                     {stamp && (
-                      <span className="tnum font-normal text-[--color-ink-faint]">
-                        · {stamp}
+                      <span className="tnum font-normal text-ink-faint">
+                        Â· {stamp}
                       </span>
                     )}
                   </span>
                 ) : (
-                  <span className="block truncate text-sm text-[--color-ink-muted]">
+                  <span className="block truncate text-sm text-ink-muted">
                     Changes save automatically
                   </span>
                 )}

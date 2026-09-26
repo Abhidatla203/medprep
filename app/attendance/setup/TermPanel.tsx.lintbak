@@ -1,23 +1,23 @@
-﻿'use client';
+'use client';
 
 // =============================================================================
 // app/attendance/setup/TermPanel.tsx
 // -----------------------------------------------------------------------------
 // Term start and end dates.
 //
-// =============================================================================
-//  WHY THIS FILE EXISTS - THE MOST EXPENSIVE BUG OF THE REBUILD
-// =============================================================================
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⚠ WHY THIS FILE EXISTS — THE MOST EXPENSIVE BUG OF THE REBUILD
+// ═════════════════════════════════════════════════════════════════════════════
 //  A grep of app/ and lib/ on 25 Sep 2026 found that NOTHING in the entire
 //  application ever wrote settings.term. Every single reference was a read, a
 //  default, or a legacy migration:
 //
 //      store.ts:278, 307-308   default BOTH dates to todayISO()
-//      generate.ts:686         builds the year window from term start/end
+//      generate.ts:686         builds the year window from term.startDate/endDate
 //      generate.ts:699, 727    gates week generation on the same range
 //
 //  So the only term value that had ever existed on a real device was
-//  today -> today. A ONE-DAY TERM.
+//  today → today. A ONE-DAY TERM.
 //
 //  What that did, in order:
 //    1. generateForYear() produced sessions for a single date.
@@ -26,13 +26,13 @@
 //    3. The student marked classes. WeekStrip showed them. MarkList showed them.
 //    4. getYearResult() never saw 20 of the 24 sessions.
 //    5. The rings reported one attended class out of a week of marks.
-//    6. OBG vanished from the grid entirely - no in-term session, no subject.
+//    6. OBG vanished from the grid entirely — no in-term session, no subject.
 //
 //  Every one of those looked like a rendering bug. None of them were. Months
 //  went into rewriting RingGrid chasing a defect that lived in a date field
 //  with no input attached to it.
 //
-//  THE LESSON, WRITTEN DOWN SO IT IS NOT RELEARNED:
+//  ★ THE LESSON, WRITTEN DOWN SO IT IS NOT RELEARNED:
 //    A required setting with a plausible-looking default and no UI is worse
 //    than one with no default at all. A missing value announces itself. A
 //    default of `today` silently poisons every downstream calculation while
@@ -40,24 +40,24 @@
 //
 //  This panel is therefore deliberately LOUD. It warns when the term is
 //  implausibly short, when today falls outside it, and when the range runs
-//  backwards. Those three states are not edge cases - they are the exact
+//  backwards. Those three states are not edge cases — they are the exact
 //  states that produced the bug.
-// =============================================================================
+// ═════════════════════════════════════════════════════════════════════════════
 //
-// NO useEffect IN THIS FILE. If a lint error points at one, you are reading a
-// stale copy - this version has none.
+// ⚠ NO useEffect IN THIS FILE. If you are reading a lint error that points at
+//   one, the paste did not save — this version has none.
 //
 //   The drafts used to be synced with useEffect + setState, which renders the
 //   OLD dates once and corrects on a second pass. useSyncedDraft does the same
 //   job during render, so nothing stale is ever painted. (SM-4)
 //
-// TAILWIND v4 - THE CLASSES THAT WERE NEVER THERE (fixed this pass)
+// ⚠ TAILWIND v4 — THE CLASSES THAT WERE NEVER THERE (fixed this pass)
 //   This file was written almost entirely in `bg-[--color-surface-sunk]` form.
-//   In Tailwind v4 that arbitrary-value syntax generates NO RULE AT ALL - the
+//   In Tailwind v4 that arbitrary-value syntax generates NO RULE AT ALL — the
 //   element simply inherits from its parent. So every background, border and
 //   text colour in this panel has been silently absent since it was written;
 //   it looked approximately right only because the card around it did the
-//   work. All are now real theme utilities. MEMORY section 2.
+//   work. All are now real theme utilities. MEMORY §2.
 // =============================================================================
 
 import { useMemo, useState } from 'react';
@@ -95,7 +95,7 @@ interface Diagnosis {
 }
 
 /**
- * The whole point of this panel.
+ * ★ The whole point of this panel.
  *
  * Silence here means the term is usable. Anything else names the exact
  * downstream consequence, because "invalid date range" teaches nobody
@@ -122,7 +122,7 @@ function diagnose(start: string, end: string, today: ISODate): Diagnosis {
     return {
       severity: 'error',
       message:
-        'A one-day term. Your rings will only count classes on this single date - everything else you mark will be ignored.',
+        'A one-day term. Your rings will only count classes on this single date — everything else you mark will be ignored.',
     };
   }
 
@@ -164,25 +164,25 @@ export default function TermPanel(props: { revision: number }) {
     return getSettings().term;
   }, [revision]);
 
-  // DELIBERATE EXCEPTION to the page's write-immediately rule.
+  // ⚠ DELIBERATE EXCEPTION to the page's write-immediately rule.
   //
   //   A date input emits a change on every keystroke, so typing "2027" passes
-  //   through 0002, 0020, 0202 - each of which would be written to storage,
+  //   through 0002, 0020, 0202 — each of which would be written to storage,
   //   bump DataVersion, invalidate the calculation cache and regenerate the
   //   whole term. Four full recalculations to type one year. The draft is
   //   committed on blur instead.
   //
-  //   useSyncedDraft keeps each draft in step with storage - an import, a
-  //   reset, another tab - without an effect.
+  //   useSyncedDraft keeps each draft in step with storage — an import, a
+  //   reset, another tab — without an effect.
   const [draftStart, setDraftStart] = useSyncedDraft(stored.startDate ?? '');
   const [draftEnd, setDraftEnd] = useSyncedDraft(stored.endDate ?? '');
 
   /**
    * Write to storage, but only when there is something valid and new to write.
    *
-   * NOT useCallback. React Compiler memoises this automatically, and a manual
-   * dependency list it disagrees with makes it skip optimising the ENTIRE
-   * component - a far bigger loss than the allocation it saves.
+   * ⚠ NOT useCallback. React Compiler memoises this automatically, and a manual
+   *   dependency list it disagrees with makes it skip optimising the ENTIRE
+   *   component — a far bigger loss than the allocation it saves.
    */
   function commit(next: { startDate?: string; endDate?: string }) {
     const startDate = next.startDate ?? draftStart;
@@ -209,7 +209,7 @@ export default function TermPanel(props: { revision: number }) {
     diagnosis.severity === 'error'
       ? 'Needs attention'
       : span > 0
-        ? `${formatDateDMY(draftStart)} - ${formatDateDMY(draftEnd)}`
+        ? `${formatDateDMY(draftStart)} – ${formatDateDMY(draftEnd)}`
         : 'Not set';
 
   return (
@@ -232,7 +232,7 @@ export default function TermPanel(props: { revision: number }) {
           <span className="mt-0.5 block truncate text-sm text-ink-muted">
             {summary}
             {span >= SUSPICIOUSLY_SHORT_DAYS && diagnosis.severity === 'ok' && (
-              <span className="text-ink-faint"> - {span} days</span>
+              <span className="text-ink-faint"> · {span} days</span>
             )}
           </span>
         </span>
@@ -240,7 +240,7 @@ export default function TermPanel(props: { revision: number }) {
           className={`shrink-0 text-ink-faint transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
           aria-hidden
         >
-          &#9662;
+          ▾
         </span>
       </button>
 
@@ -269,6 +269,7 @@ export default function TermPanel(props: { revision: number }) {
                 type="date"
                 className="field tnum w-full"
                 value={draftEnd}
+                // Stops the browser offering an end date before the start.
                 min={isISODate(draftStart) ? draftStart : undefined}
                 onChange={(e) => setDraftEnd(e.target.value)}
                 onBlur={() => commit({ endDate: draftEnd })}
@@ -276,7 +277,7 @@ export default function TermPanel(props: { revision: number }) {
             </label>
           </div>
 
-          {/* The warning. Names the CONSEQUENCE, not the rule - "invalid
+          {/* ★ The warning. Names the CONSEQUENCE, not the rule — "invalid
               range" teaches nobody why their rings are empty. */}
           {diagnosis.severity !== 'ok' && (
             <p
@@ -293,7 +294,7 @@ export default function TermPanel(props: { revision: number }) {
 
           {diagnosis.severity === 'ok' && (
             <p className="tnum text-sm text-ink-faint">
-              {span} days - today is inside your term
+              {span} days · today is inside your term
             </p>
           )}
         </div>

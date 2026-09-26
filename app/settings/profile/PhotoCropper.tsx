@@ -1,12 +1,73 @@
 "use client";
 
+// =============================================================================
+// app/settings/profile/PhotoCropper.tsx
+// -----------------------------------------------------------------------------
+// Drag-and-zoom circular crop, exported as a JPEG data URL.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⚠ WHY FileReader AND NOT URL.createObjectURL — THE BLACK CIRCLE BUG
+// ═════════════════════════════════════════════════════════════════════════════
+// The obvious implementation is an object URL created once at mount:
+//
+//     const [url] = useState(() => URL.createObjectURL(file));
+//     useEffect(() => () => URL.revokeObjectURL(url), [url]);
+//
+// It produces a permanently black circle in development, and the reason is
+// worth knowing because it will bite again:
+//
+//   1. StrictMode mounts the component, runs effects, then UNMOUNTS and
+//      REMOUNTS it — deliberately, to surface exactly this class of bug.
+//   2. The simulated unmount runs the cleanup, which REVOKES the URL.
+//   3. The remount preserves state, so `url` is the same string — but it now
+//      points at nothing. The browser cannot load it.
+//   4. onLoad never fires, dims stays null, ready stays false: black circle,
+//      dead zoom slider, and no error in the console.
+//
+// A data URL cannot be revoked, so the whole failure mode disappears.
+//
+// ⚠ AND THE setState RULE IS STILL HONOURED. react-hooks/set-state-in-effect
+//   forbids setState in an effect BODY. Calling it from an asynchronous
+//   CALLBACK of an external system is the documented, correct use of an
+//   effect — which is exactly what reader.onload is.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⚠ REMOUNT, DON'T RESET.
+// ═════════════════════════════════════════════════════════════════════════════
+// The parent mounts this ONLY while cropping, keyed on the file. A new file
+// means a new key means a genuinely new component, so zoom and offset start
+// fresh with no reset logic at all. `file` is therefore never null here.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⚠ IMAGE SIZE COMES FROM STATE, NOT FROM THE REF.
+// ═════════════════════════════════════════════════════════════════════════════
+// size() used to read imgRef.current.naturalWidth during render. Refs are not
+// render inputs: changing one re-renders nothing, so the layout could be built
+// from dimensions React had never seen. Dimensions now arrive via onLoad into
+// state, which is a real render input.
+// =============================================================================
+
 import { useEffect, useRef, useState } from "react";
 
+/** On-screen crop circle, in CSS pixels. */
 const VIEW = 280;
+
+/** Exported image, square. 512 survives a retina avatar without bloating. */
 const OUT = 512;
 
+/**
+ * Data-URL size ceiling.
+ *
+ * ⚠ NOT cosmetic. The photo is written to BOTH localStorage keys, so it costs
+ *   twice this. localStorage caps at roughly 5 MB, and when it overflows
+ *   persist() swallows the error and EVERY setting silently stops saving.
+ *   (SM-8)
+ */
+const MAX_BYTES = 350_000;
+
 type Props = {
-  file: File | null;
+  /** Never null — the parent only mounts this while cropping. */
+  file: File;
   onCancel: () => void;
   onConfirm: (dataUrl: string) => void;
 };
@@ -14,35 +75,65 @@ type Props = {
 export default function PhotoCropper({ file, onCancel, onConfirm }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
-  const [url, setUrl] = useState("");
-  const [ready, setReady] = useState(false);
+
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  // ★ Natural dimensions, from onLoad. State, not a ref.
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [busy, setBusy] = useState(false);
 
+  /**
+   * ✅ A legitimate effect: it drives an external system (FileReader) and only
+   *    calls setState from its CALLBACKS, never from the body.
+   *
+   *    `cancelled` guards the case where the component unmounts mid-read —
+   *    without it, a late callback would setState on a dead component.
+   */
   useEffect(() => {
-    if (!file) return;
-    const next = URL.createObjectURL(file);
-    setUrl(next);
-    setReady(false);
-    setZoom(1);
-    setOffset({ x: 0, y: 0 });
-    return () => URL.revokeObjectURL(next);
+    let cancelled = false;
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (cancelled) return;
+      setUrl(typeof reader.result === "string" ? reader.result : null);
+    };
+
+    reader.onerror = () => {
+      if (!cancelled) setFailed(true);
+    };
+
+    reader.readAsDataURL(file);
+
+    return () => {
+      cancelled = true;
+      reader.abort();
+    };
   }, [file]);
 
-  function size() {
-    const img = imgRef.current;
-    if (!img) return { imgW: 1, imgH: 1, scale: 1 };
-    const imgW = img.naturalWidth || 1;
-    const imgH = img.naturalHeight || 1;
-    const base = Math.max(VIEW / imgW, VIEW / imgH);
-    return { imgW, imgH, scale: base * zoom };
-  }
+  // ---- Derived geometry. Pure, correct on the first paint. ----
+  const ready = url !== null && dims !== null;
+  const imgW = dims?.w ?? 1;
+  const imgH = dims?.h ?? 1;
 
-  function clamp(next: { x: number; y: number }) {
-    const { imgW, imgH, scale } = size();
-    const maxX = Math.max(0, (imgW * scale - VIEW) / 2);
-    const maxY = Math.max(0, (imgH * scale - VIEW) / 2);
+  // "Cover": the smallest scale that still fills the circle in both axes, so
+  // there is never a gap at the edge.
+  const baseScale = Math.max(VIEW / imgW, VIEW / imgH);
+  const scale = baseScale * zoom;
+
+  /**
+   * Keep the image covering the circle — no empty corners.
+   *
+   * ⚠ Takes the scale explicitly. An earlier version closed over `zoom`, so
+   *   the slider clamped against the PREVIOUS zoom and a fast drag could leave
+   *   a sliver of background showing.
+   */
+  function clampAt(next: { x: number; y: number }, s: number) {
+    const maxX = Math.max(0, (imgW * s - VIEW) / 2);
+    const maxY = Math.max(0, (imgH * s - VIEW) / 2);
     return {
       x: Math.min(maxX, Math.max(-maxX, next.x)),
       y: Math.min(maxY, Math.max(-maxY, next.y)),
@@ -50,17 +141,17 @@ export default function PhotoCropper({ file, onCancel, onConfirm }: Props) {
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (!ready) return;
+    // Pointer capture keeps the drag alive when the finger leaves the circle.
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!dragRef.current) return;
+    const d = dragRef.current;
+    if (!d) return;
     setOffset(
-      clamp({
-        x: dragRef.current.ox + (e.clientX - dragRef.current.x),
-        y: dragRef.current.oy + (e.clientY - dragRef.current.y),
-      })
+      clampAt({ x: d.ox + (e.clientX - d.x), y: d.oy + (e.clientY - d.y) }, scale),
     );
   }
 
@@ -68,36 +159,56 @@ export default function PhotoCropper({ file, onCancel, onConfirm }: Props) {
     dragRef.current = null;
   }
 
+  function onZoom(nextZoom: number) {
+    const nextScale = baseScale * nextZoom;
+    setZoom(nextZoom);
+    // Re-clamp against the NEW scale — zooming out can strand the image
+    // off-centre otherwise.
+    setOffset((prev) => clampAt(prev, nextScale));
+  }
+
+  /**
+   * Draw the visible circle to a canvas and hand back a JPEG data URL.
+   *
+   * Reading imgRef here is correct: this is an event handler, not render.
+   */
   async function confirm() {
     const img = imgRef.current;
-    if (!img) return;
+    if (!img || !ready) return;
+
     setBusy(true);
-    const { scale } = size();
+
     const canvas = document.createElement("canvas");
     canvas.width = OUT;
     canvas.height = OUT;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) {
       setBusy(false);
       return;
     }
+
+    // Slate backdrop behind any transparency — a PNG with a clear background
+    // would otherwise export as black.
     ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, OUT, OUT);
-    const left = (VIEW - img.naturalWidth * scale) / 2 + offset.x;
-    const top = (VIEW - img.naturalHeight * scale) / 2 + offset.y;
-    const sx = -left / scale;
-    const sy = -top / scale;
-    const sw = VIEW / scale;
-    const sh = VIEW / scale;
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, OUT, OUT);
 
+    // Convert on-screen placement back into source-image coordinates.
+    const left = (VIEW - imgW * scale) / 2 + offset.x;
+    const top = (VIEW - imgH * scale) / 2 + offset.y;
+    ctx.drawImage(img, -left / scale, -top / scale, VIEW / scale, VIEW / scale, 0, 0, OUT, OUT);
+
+    // Step quality down until it fits. Quality first, because a slightly soft
+    // avatar beats a hard failure.
     let quality = 0.82;
     let dataUrl = canvas.toDataURL("image/jpeg", quality);
-    while (dataUrl.length > 350000 && quality > 0.45) {
+    while (dataUrl.length > MAX_BYTES && quality > 0.45) {
       quality -= 0.08;
       dataUrl = canvas.toDataURL("image/jpeg", quality);
     }
-    if (dataUrl.length > 350000) {
+
+    // Still too big at minimum quality — shrink the pixels instead.
+    if (dataUrl.length > MAX_BYTES) {
       const small = document.createElement("canvas");
       small.width = 320;
       small.height = 320;
@@ -107,44 +218,72 @@ export default function PhotoCropper({ file, onCancel, onConfirm }: Props) {
         dataUrl = small.toDataURL("image/jpeg", 0.7);
       }
     }
+
     setBusy(false);
     onConfirm(dataUrl);
   }
 
-  if (!file) return null;
-
-  const { imgW, imgH, scale } = size();
-
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-4">
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Align photo"
+    >
       <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <h3 className="text-sm font-semibold text-slate-200">Align photo</h3>
+
         <div
           className="relative mx-auto mt-4 overflow-hidden rounded-full border border-slate-700 bg-slate-950"
-          style={{ width: VIEW, height: VIEW, touchAction: "none", cursor: "grab" }}
+          // touchAction none stops the phone scrolling the page mid-drag.
+          style={{
+            width: VIEW,
+            height: VIEW,
+            touchAction: "none",
+            cursor: ready ? "grab" : "default",
+          }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          {url ? (
+          {url && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               ref={imgRef}
               src={url}
               alt=""
               draggable={false}
-              onLoad={() => setReady(true)}
+              onLoad={(e) =>
+                setDims({
+                  w: e.currentTarget.naturalWidth || 1,
+                  h: e.currentTarget.naturalHeight || 1,
+                })
+              }
+              onError={() => setFailed(true)}
               className="absolute max-w-none select-none"
+              // Unsized until the dimensions land, so there is no flash of a
+              // wrongly scaled image.
               style={{
                 width: ready ? imgW * scale : undefined,
                 height: ready ? imgH * scale : undefined,
                 left: ready ? (VIEW - imgW * scale) / 2 + offset.x : 0,
                 top: ready ? (VIEW - imgH * scale) / 2 + offset.y : 0,
+                visibility: ready ? "visible" : "hidden",
               }}
             />
-          ) : null}
+          )}
+
+          {/* Something to look at while the file is being read, and an honest
+              message if it cannot be. A silent black circle is the worst of
+              both — see the header note. */}
+          {!ready && (
+            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-slate-500">
+              {failed ? "That file could not be read as an image." : "Loading…"}
+            </div>
+          )}
         </div>
+
         <label className="mt-4 block">
           <span className="text-xs font-semibold text-slate-300">Zoom</span>
           <input
@@ -153,14 +292,12 @@ export default function PhotoCropper({ file, onCancel, onConfirm }: Props) {
             max={3}
             step={0.01}
             value={zoom}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              setZoom(next);
-              setOffset((prev) => clamp(prev));
-            }}
+            disabled={!ready}
+            onChange={(e) => onZoom(Number(e.target.value))}
             className="mt-2 w-full"
           />
         </label>
+
         <div className="mt-4 flex gap-2">
           <button
             type="button"

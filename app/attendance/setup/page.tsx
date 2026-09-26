@@ -3,7 +3,7 @@
 // =============================================================================
 // app/attendance/setup/page.tsx
 // -----------------------------------------------------------------------------
-// The timetable builder. Four sections, in the order a student needs them:
+// The timetable BUILDER. Four sections, in the order a student needs them:
 //
 //   1. COLLEGE HOURS   — set once, shapes every time picker afterwards
 //   2. WEEKLY CLASSES  — the recurring grid
@@ -11,8 +11,20 @@
 //   4. YOUR DATA       — carry-forward figures, export, import
 //
 // ═════════════════════════════════════════════════════════════════════════════
-//  ⚠ WHY THERE IS NO PAGE-LEVEL SAVE BUTTON
+//  ⚠ SETUP vs SETTINGS — THE BOUNDARY. Hold this line.
 // ═════════════════════════════════════════════════════════════════════════════
+// SETUP describes WHAT YOUR COLLEGE DOES.         → facts. Lives here.
+// SETTINGS describes WHAT YOU WANT THE APP TO DO. → preferences. Lives in /settings.
+//
+// So: hours, working days, the weekly grid, postings, term dates, backups → HERE.
+// Thresholds, unmarked policy, extra-class defaults, alerts, theme  → SETTINGS.
+//
+// This boundary is why the two screens are NOT merged. A builder needs a canvas;
+// a preference needs a row in a list. Collapsing either into the other makes
+// both worse. MEMORY §3 rule 3, §7 and §14 #4 all flagged this drift.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ⚠ WHY THERE IS NO PAGE-LEVEL SAVE BUTTON
 // Every mutation writes to localStorage synchronously and calls notify(). There
 // is no draft state held in memory. A "Save changes" button here would call a
 // function with an empty body.
@@ -21,7 +33,6 @@
 // indistinguishable from silent failure. SaveBar fixes that: it flashes a
 // timestamped "Saved" on every write, states the resting truth otherwise, and
 // offers Done as the real primary action.
-// ═════════════════════════════════════════════════════════════════════════════
 //
 // ⚠ THE SHEET LAYOUT FIX
 // The class sheet once used `max-h-[85vh] overflow-y-auto` with a
@@ -30,9 +41,45 @@
 // and the sheet was already at max height, leaving nothing to scroll toward.
 // It now uses .sheet from globals.css: flex column, footer as a SIBLING of the
 // scroll area. A sibling cannot scroll away with content it does not contain.
-// =============================================================================
+//
+// ⚠ TAILWIND v4 — THE CLASS THAT WASN'T THERE
+// This file was once written almost entirely in `bg-[--color-surface-sunk]`
+// style. In Tailwind v4 that arbitrary-value form resolves to NOTHING — no rule
+// is generated, the element simply inherits. Every one is now a real theme
+// utility (`bg-surface-sunk`, `text-ink-muted`, `border-line`, `rounded-card`),
+// matching /attendance/page.tsx. MEMORY §2, and the original cause of the blank
+// Present buttons.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⚠ NO setState INSIDE useEffect. ANYWHERE. (SM-4)
+// ═════════════════════════════════════════════════════════════════════════════
+// React 19's react-hooks/set-state-in-effect rule caught five instances in this
+// file. They fell into three groups, each with a different correct answer:
+//
+//   1. MOUNT GATE and STORE SUBSCRIPTION  → useSyncExternalStore.
+//      localStorage is an external store. This hook exists for external stores.
+//      It also fixes hydration properly, via a separate server snapshot.
+//
+//   2. ONE-SHOT MIGRATION  → a module-level function with its own guard.
+//      Module scope outlives StrictMode's double invoke, remounts and fast
+//      refresh, which is exactly the lifetime a once-per-load job needs.
+//
+//   3. THE THREE DROPDOWN RESYNCS  → deleted outright; the values are DERIVED.
+//      This was the interesting one. The old code stored `start`, `end` and
+//      `category` in state, then used an effect to snap them back into range
+//      whenever the options list changed. That renders ONCE WITH AN INVALID
+//      VALUE and corrects on the next pass — for one frame the Ends dropdown
+//      really is showing a time that clashes with another class.
+//
+//      A value that can always be computed from other values is not state. The
+//      pattern now is: keep the student's raw CHOICE in state, and compute the
+//      EFFECTIVE value during render by validating that choice against the
+//      current options. Correct on the first paint, no effect, no flash, and
+//      one fewer way for the picker to disagree with itself.
+// ═════════════════════════════════════════════════════════════════════════════
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 
 import type {
@@ -91,49 +138,193 @@ const AFTER_HOURS_END: TimeHHMM = '23:00';
 
 const ALL_DAYS: DayIndex[] = [0, 1, 2, 3, 4, 5, 6];
 
+const DEFAULT_YEAR: AcademicYear = '3rd MBBS Part 2';
+
 /**
- * Category identity. One accent each, as a 3px rail on the row plus a tinted
- * chip. Enough to scan a day at a glance without turning the list into a paint
- * chart.
+ * CATEGORY IDENTITY — one accent each, as a 3px rail plus a tinted chip.
+ *
+ * ⚠ WHY HEX AND NOT TOKENS. Two reasons, both learned the hard way:
+ *
+ *   1. `--color-practical` is THE SAME GREEN as `--color-safe` (#0f9b6c).
+ *      The old practical chip therefore read as "this is fine" purely by being
+ *      a practical. Colour must mean ONE thing per screen. (MEMORY §8)
+ *
+ *   2. These three hues already have a canonical definition — they are the ring
+ *      arc colours. Setup and the ring grid must agree, or the student learns
+ *      two colour languages for the same three words.
+ *
+ *        theory    #7c3aed  violet
+ *        practical #ea580c  orange
+ *        clinical  #0891b2  cyan
+ *
+ * Inline style, not a class, so no build step can silently drop it.
  */
-const CAT: Record<ClassCategory, { rail: string; chip: string; label: string }> = {
-  theory: {
-    rail: 'bg-[--color-theory]',
-    chip: 'bg-[#eef1fe] text-[#3b52c9] border-[#d7ddfb]',
-    label: 'Theory',
-  },
-  practical: {
-    rail: 'bg-[--color-practical]',
-    chip: 'bg-[--color-safe-soft] text-[--color-safe] border-[--color-safe-line]',
-    label: 'Practical',
-  },
-  clinical: {
-    rail: 'bg-[--color-clinical]',
-    chip: 'bg-[#f6ebfe] text-[#7c26c9] border-[#e7d2fa]',
-    label: 'Clinical',
-  },
+const CAT: Record<
+  ClassCategory,
+  { hue: string; soft: string; line: string; label: string }
+> = {
+  theory:    { hue: '#7c3aed', soft: '#f1ecfd', line: '#e0d5fb', label: 'Theory' },
+  practical: { hue: '#ea580c', soft: '#fef0e7', line: '#fbd9c2', label: 'Practical' },
+  clinical:  { hue: '#0891b2', soft: '#e6f6fa', line: '#c6e9f1', label: 'Clinical' },
 };
 
 
 // -----------------------------------------------------------------------------
-// Hooks
+// Module-level plumbing
 //
-// Every mutation in store.ts calls notify(). useStoreRevision turns that into a
-// re-render. Nothing caches a derived value — the page re-reads storage on every
-// change, which is what makes a toggle feel instant. (TRAP 5)
+// Everything here is deliberately OUTSIDE the components. Module scope survives
+// remounts, StrictMode's double-invoke and fast refresh — exactly the lifetime
+// a one-shot migration and a store counter need.
 // -----------------------------------------------------------------------------
 
-function useStoreRevision(): number {
-  const [rev, setRev] = useState(0);
-  useEffect(() => subscribe(() => setRev((n) => n + 1)), []);
-  return rev;
+/**
+ * Bumped once per store write. useSyncExternalStore compares what getSnapshot
+ * returns against the previous value; a change means re-render.
+ *
+ * ⚠ MUST live out here. As component state it would reset on every remount and
+ *   the hook would lose track of what it had already seen.
+ */
+let setupRevision = 0;
+
+/**
+ * ⚠ MUST be a stable reference. Defined inside a component it would be a brand
+ *   new function every render, and React would dutifully unsubscribe and
+ *   resubscribe each time.
+ */
+function subscribeToStore(onStoreChange: () => void): () => void {
+  return subscribe(() => {
+    setupRevision += 1;
+    onStoreChange();
+  });
 }
 
-/** Guards hydration mismatch: localStorage does not exist on the server. */
+const getSetupRevision = (): number => setupRevision;
+
+/** The server has no store, so it is forever at revision zero. */
+const getServerRevision = (): number => 0;
+
+/**
+ * The mount gate, expressed as a store that can never change.
+ *
+ * A no-op subscribe is correct here, not lazy: this "store" has exactly two
+ * states — rendering on the server, rendering on the client — and once mounted
+ * it can never transition again. There is nothing to notify anyone about.
+ */
+const subscribeToNothing = (): (() => void) => () => {};
+const getIsClient = (): boolean => true;
+const getIsServer = (): boolean => false;
+
+type V2Result = { note: string | null; targetYear: AcademicYear | null };
+
+/**
+ * v2 → v3 timetable migration result. `null` means "not attempted yet".
+ */
+let v2Migration: V2Result | null = null;
+
+/**
+ * Runs the v2 → v3 migration at most once per page load, and returns what the
+ * student should be told about it.
+ *
+ * ⚠ SAFE TO CALL DURING RENDER, and that is the whole point — it must happen
+ *   before the first getTimetableStore() read, and "the line above it" is the
+ *   only ordering guarantee that cannot be accidentally reshuffled. The module
+ *   guard means the second and every later call is a property read, never a
+ *   storage write.
+ */
+function ensureV2MigrationHasRun(): V2Result {
+  if (v2Migration !== null) return v2Migration;
+
+  // Belt and braces: never touch storage during SSR.
+  if (typeof window === 'undefined') return { note: null, targetYear: null };
+
+  try {
+    const r = migrateV2toV3();
+    v2Migration = {
+      note:
+        r.ran && r.entriesMigrated > 0
+          ? `Imported ${r.entriesMigrated} ${r.entriesMigrated === 1 ? 'class' : 'classes'} from your previous timetable. Day assignments have been corrected.`
+          : null,
+      targetYear: r.targetYear ?? null,
+    };
+  } catch {
+    // A failed migration must never white-screen the builder. Old data is READ,
+    // never deleted, so the student lands on defaults with their data intact.
+    v2Migration = { note: null, targetYear: null };
+  }
+
+  return v2Migration;
+}
+
+/**
+ * Minutes between two HH:MM strings, floored at zero.
+ *
+ * Was written out twice — once for the weekly total, once per day card. Two
+ * copies of the same arithmetic is two places for it to drift.
+ */
+function minutesBetween(start: TimeHHMM, end: TimeHHMM): number {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  return Math.max(0, eh * 60 + em - (sh * 60 + sm));
+}
+
+/**
+ * Pick the effective value from a list of valid options.
+ *
+ * This tiny function is what replaced three useEffect blocks. If the student's
+ * choice is still valid, honour it; otherwise fall back to the first option.
+ * Evaluated during render, so the value shown is ALWAYS legal — there is no
+ * intermediate frame holding a stale one.
+ */
+function resolveChoice<T>(choice: T | null, options: readonly T[], fallback: T): T {
+  if (choice !== null && options.includes(choice)) return choice;
+  return options[0] ?? fallback;
+}
+
+
+// -----------------------------------------------------------------------------
+// Hooks
+// -----------------------------------------------------------------------------
+
+/**
+ * Re-renders on every store write.
+ *
+ * Nothing caches a derived value — the page re-reads storage on every change,
+ * which is what makes a toggle feel instant. (TRAP 5)
+ */
+function useStoreRevision(): number {
+  return useSyncExternalStore(subscribeToStore, getSetupRevision, getServerRevision);
+}
+
+/**
+ * Guards hydration mismatch: localStorage does not exist on the server.
+ *
+ * Returns false for the server render AND the first client render — identical
+ * markup, so no mismatch — then true from adoption onward, with no extra pass.
+ */
 function useMounted(): boolean {
-  const [m, setM] = useState(false);
-  useEffect(() => setM(true), []);
-  return m;
+  return useSyncExternalStore(subscribeToNothing, getIsClient, getIsServer);
+}
+
+/**
+ * Locks page scroll while any sheet is open.
+ *
+ * On a phone, dragging inside an open sheet used to scroll the PAGE behind it —
+ * so closing the sheet dumped you somewhere else entirely. globals.css already
+ * watches `body[data-modal-open="true"]`; this just raises the flag.
+ *
+ * ✅ This effect is legitimate: it writes to an external system (the DOM) and
+ *    calls no setState. The cleanup removes the attribute unconditionally, so a
+ *    component unmounting mid-sheet — a route change, a fast refresh — can
+ *    never leave the page permanently frozen.
+ */
+function useScrollLock(locked: boolean): void {
+  useEffect(() => {
+    if (!locked) return;
+    document.body.dataset.modalOpen = 'true';
+    return () => {
+      delete document.body.dataset.modalOpen;
+    };
+  }, [locked]);
 }
 
 
@@ -145,9 +336,22 @@ export default function AttendanceSetupPage() {
   const mounted = useMounted();
   const rev = useStoreRevision();
 
-  const [year, setYear] = useState<AcademicYear>('3rd MBBS Part 2');
+  // ★ Forced to completion before any store read below. On the server this is
+  //   a no-op returning nulls; on the client it runs exactly once.
+  const migration = ensureV2MigrationHasRun();
+
+  // Lazy initialiser — runs once, and the migration above has already settled,
+  // so its targetYear is available immediately.
+  const [year, setYear] = useState<AcademicYear>(
+    () => ensureV2MigrationHasRun().targetYear ?? DEFAULT_YEAR,
+  );
+
   const [hoursOpen, setHoursOpen] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+
+  // The migration note shows until dismissed. Dismissal is a user action, so
+  // this setState lives in an event handler, where setState belongs.
+  const [noteDismissed, setNoteDismissed] = useState(false);
+  const note = !noteDismissed ? migration.note : null;
 
   const [addForDay, setAddForDay] = useState<DayIndex | null>(null);
   const [editing, setEditing] = useState<{ entry: TimetableEntry; day: DayIndex } | null>(null);
@@ -157,17 +361,11 @@ export default function AttendanceSetupPage() {
   // stand down. Two pinned footers on screen at once looks like a bug.
   const [childSheetOpen, setChildSheetOpen] = useState(false);
 
-  // ---- One-time v2 → v3 migration. Fixes the legacy day index. ----
-  useEffect(() => {
-    if (!mounted) return;
-    const r = migrateV2toV3();
-    if (r.ran && r.entriesMigrated > 0) {
-      setNote(
-        `Imported ${r.entriesMigrated} ${r.entriesMigrated === 1 ? 'class' : 'classes'} from your previous timetable. Day assignments have been corrected.`,
-      );
-    }
-    if (r.targetYear) setYear(r.targetYear);
-  }, [mounted]);
+  const ownSheetOpen = addForDay !== null || editing !== null || actionsFor !== null;
+
+  // ⚠ Hooks must run in the same order on every render, so this sits ABOVE the
+  //   skeleton's early return, never below it.
+  useScrollLock(ownSheetOpen || childSheetOpen);
 
   const settings = useMemo(() => {
     void rev;
@@ -191,9 +389,7 @@ export default function AttendanceSetupPage() {
     for (const list of Object.values(byDay)) {
       for (const e of list ?? []) {
         classes += 1;
-        const [sh, sm] = e.start.split(':').map(Number);
-        const [eh, em] = e.end.split(':').map(Number);
-        minutes += Math.max(0, eh * 60 + em - (sh * 60 + sm));
+        minutes += minutesBetween(e.start, e.end);
       }
     }
     return { classes, minutes };
@@ -205,8 +401,12 @@ export default function AttendanceSetupPage() {
     setActionsFor(null);
   }, []);
 
+  // ✅ Legitimate effect: subscribes to an external system (the keyboard) and
+  //    only ever calls setState from inside the callback, never in the body.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeSheets();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeSheets();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [closeSheets]);
@@ -214,15 +414,13 @@ export default function AttendanceSetupPage() {
   if (!mounted || !settings) {
     return (
       <div className="space-y-4 py-4">
-        <div className="h-10 w-56 animate-pulse rounded-xl bg-[--color-surface-sunk]" />
+        <div className="h-10 w-56 animate-pulse rounded-xl bg-surface-sunk" />
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-28 animate-pulse rounded-[--radius-card] bg-[--color-surface-sunk]" />
+          <div key={i} className="h-28 animate-pulse rounded-card bg-surface-sunk" />
         ))}
       </div>
     );
   }
-
-  const ownSheetOpen = addForDay !== null || editing !== null || actionsFor !== null;
 
   return (
     <div className="animate-rise pb-24 md:pb-20">
@@ -230,13 +428,13 @@ export default function AttendanceSetupPage() {
       <header className="aurora mb-8 pt-2">
         <Link
           href="/attendance"
-          className="mb-3 inline-flex items-center gap-1.5 text-sm text-[--color-ink-muted] transition hover:text-[--color-ink]"
+          className="mb-3 inline-flex items-center gap-1.5 text-sm text-ink-muted transition hover:text-ink"
         >
           ← Attendance
         </Link>
 
         <h1 className="display text-4xl md:text-5xl">Build your timetable</h1>
-        <p className="mt-2 max-w-md text-[15px] text-[--color-ink-muted]">
+        <p className="mt-2 max-w-md text-[15px] text-ink-muted">
           Add each class once. Everything after that is a single tap a day.
         </p>
 
@@ -254,12 +452,16 @@ export default function AttendanceSetupPage() {
       </header>
 
       {note && (
-        <div className="mb-6 flex items-start gap-3 rounded-[--radius-card] border border-[--color-safe-line] bg-[--color-safe-soft] p-4">
-          <span className="text-[--color-safe]" aria-hidden>✓</span>
-          <p className="flex-1 text-sm text-[--color-safe]">{note}</p>
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-6 flex items-start gap-3 rounded-card border border-safe-line bg-safe-soft p-4"
+        >
+          <span className="text-safe" aria-hidden>✓</span>
+          <p className="flex-1 text-sm text-safe">{note}</p>
           <button
-            onClick={() => setNote(null)}
-            className="-m-1.5 rounded-lg p-1.5 text-[--color-safe] transition hover:bg-white/60"
+            onClick={() => setNoteDismissed(true)}
+            className="-m-1.5 rounded-lg p-1.5 text-safe transition hover:bg-white/60"
             aria-label="Dismiss"
           >
             ✕
@@ -269,8 +471,11 @@ export default function AttendanceSetupPage() {
 
       {/* ---------------------------- Year picker --------------------------- */}
       <div className="mb-4">
-        <span className="eyebrow mb-2 block">Academic year</span>
+        <label className="eyebrow mb-2 block" htmlFor="setup-year">
+          Academic year
+        </label>
         <select
+          id="setup-year"
           value={year}
           onChange={(e) => setYear(e.target.value as AcademicYear)}
           className="field field-select font-medium"
@@ -292,7 +497,7 @@ export default function AttendanceSetupPage() {
       {/* --------------------------- Weekly classes ------------------------- */}
       <div className="mb-3 mt-8 flex items-baseline justify-between">
         <h2 className="eyebrow">Weekly classes</h2>
-        <span className="text-sm text-[--color-ink-faint]">
+        <span className="text-sm text-ink-faint">
           {totals.classes === 0 ? 'Nothing yet' : `${totals.classes} total`}
         </span>
       </div>
@@ -312,6 +517,19 @@ export default function AttendanceSetupPage() {
       <PostingsPanel year={year} revision={rev} onSheetChange={setChildSheetOpen} />
       <DataPanel year={year} revision={rev} onSheetChange={setChildSheetOpen} />
 
+      {/* ------------------------ Pointer to settings -----------------------
+          The boundary made visible. A student who came here hunting for "75%"
+          should find out where it actually lives, not conclude the app cannot
+          do it. This single line is what stops setup slowly absorbing
+          preferences all over again. */}
+      <p className="mt-8 text-center text-sm text-ink-faint">
+        Looking for attendance targets?{' '}
+        <Link href="/settings" className="font-medium text-ink-muted underline underline-offset-2">
+          They live in Settings
+        </Link>
+        .
+      </p>
+
       {/* --------------------------- Save status bar ------------------------ */}
       <SaveBar revision={rev} hidden={ownSheetOpen || childSheetOpen} />
 
@@ -328,6 +546,11 @@ export default function AttendanceSetupPage() {
 
       {(addForDay !== null || editing !== null) && (
         <ClassSheet
+          // ★ key: forces a fresh component per class, so every piece of state
+          //   inside starts from the right entry. Without it, opening Edit on
+          //   one class straight after another would reuse the previous values
+          //   — the classic "the form remembered the last thing" bug.
+          key={editing ? `edit-${editing.entry.id}` : `add-${addForDay}`}
           year={year}
           day={editing ? editing.day : (addForDay as DayIndex)}
           existing={editing?.entry ?? null}
@@ -373,33 +596,37 @@ function HoursCard(props: {
       <button
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center justify-between px-5 py-4 text-left transition hover:bg-[--color-surface-sunk]"
+        className="flex w-full items-center justify-between px-5 py-4 text-left transition hover:bg-surface-sunk"
       >
         <span>
-          <span className="block text-sm font-semibold text-[--color-ink]">College hours</span>
-          <span className="mt-0.5 block text-sm text-[--color-ink-muted]">
+          <span className="block text-sm font-semibold text-ink">College hours</span>
+          <span className="mt-0.5 block text-sm text-ink-muted">
             {formatTimeRange(cfg.dayStart, cfg.dayEnd)} · {cfg.workingDays.length} days a week
           </span>
         </span>
         <span
-          className={`text-[--color-ink-faint] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          className={`text-ink-faint transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
           aria-hidden
         >▾</span>
       </button>
 
       {open && (
-        <div className="space-y-5 border-t border-[--color-line] px-5 py-5">
+        <div className="space-y-5 border-t border-line px-5 py-5">
           <div className="grid grid-cols-2 gap-3">
             <L label="Day starts">
               <input
-                type="time" className="field tnum" value={cfg.dayStart}
-                onChange={(e) => onChange({ dayStart: e.target.value })}
+                type="time"
+                className="field tnum"
+                value={cfg.dayStart}
+                onChange={(e) => onChange({ dayStart: e.target.value as TimeHHMM })}
               />
             </L>
             <L label="Day ends">
               <input
-                type="time" className="field tnum" value={cfg.dayEnd}
-                onChange={(e) => onChange({ dayEnd: e.target.value })}
+                type="time"
+                className="field tnum"
+                value={cfg.dayEnd}
+                onChange={(e) => onChange({ dayEnd: e.target.value as TimeHHMM })}
               />
             </L>
           </div>
@@ -411,7 +638,7 @@ function HoursCard(props: {
                   key={d}
                   onClick={() => toggleDay(d)}
                   aria-pressed={cfg.workingDays.includes(d)}
-                  className={`seg min-w-[3rem] flex-none px-3 ${cfg.workingDays.includes(d) ? 'seg-on' : ''}`}
+                  className={`seg min-w-12 flex-none px-3 ${cfg.workingDays.includes(d) ? 'seg-on' : ''}`}
                 >
                   {DAY_NAMES_SHORT[d]}
                 </button>
@@ -436,10 +663,10 @@ function HoursCard(props: {
 
           <label className="flex cursor-pointer items-start justify-between gap-4">
             <span>
-              <span className="block text-sm font-medium text-[--color-ink]">
+              <span className="block text-sm font-medium text-ink">
                 Allow after-hours classes
               </span>
-              <span className="mt-0.5 block text-sm text-[--color-ink-muted]">
+              <span className="mt-0.5 block text-sm text-ink-muted">
                 An escape hatch for the occasional evening session.
               </span>
             </span>
@@ -447,7 +674,7 @@ function HoursCard(props: {
               type="checkbox"
               checked={cfg.allowAfterHours}
               onChange={(e) => onChange({ allowAfterHours: e.target.checked })}
-              className="mt-0.5 h-6 w-6 shrink-0 rounded-md accent-[--color-brand]"
+              className="mt-0.5 h-6 w-6 shrink-0 rounded-md accent-brand"
             />
           </label>
         </div>
@@ -469,59 +696,77 @@ function DayCard(props: {
 }) {
   const { day, entries, onAdd, onSelect } = props;
 
-  const minutes = entries.reduce((sum, e) => {
-    const [sh, sm] = e.start.split(':').map(Number);
-    const [eh, em] = e.end.split(':').map(Number);
-    return sum + Math.max(0, eh * 60 + em - (sh * 60 + sm));
-  }, 0);
+  const minutes = entries.reduce((sum, e) => sum + minutesBetween(e.start, e.end), 0);
 
   return (
     <section className="card overflow-hidden">
       <div className="flex items-center justify-between px-5 pb-2 pt-4">
         <div className="flex items-baseline gap-2.5">
-          <h3 className="text-[15px] font-semibold text-[--color-ink]">{DAY_NAMES[day]}</h3>
+          <h3 className="text-[15px] font-semibold text-ink">{DAY_NAMES[day]}</h3>
           {entries.length > 0 && (
-            <span className="text-sm text-[--color-ink-faint]">{formatDuration(minutes)}</span>
+            <span className="text-sm text-ink-faint">{formatDuration(minutes)}</span>
           )}
         </div>
-        <button onClick={onAdd} className="btn btn-quiet -mr-2 min-h-10 px-3 text-sm">
+        <button
+          onClick={onAdd}
+          className="btn btn-quiet -mr-2 min-h-10 px-3 text-sm"
+          aria-label={`Add a class to ${DAY_NAMES[day]}`}
+        >
           + Add
         </button>
       </div>
 
       {entries.length === 0 ? (
-        <p className="px-5 pb-4 text-sm text-[--color-ink-faint]">No classes</p>
+        <p className="px-5 pb-4 text-sm text-ink-faint">No classes</p>
       ) : (
-        <ul className="divide-y divide-[--color-line]">
-          {entries.map((e) => (
-            <li key={e.id}>
-              <button
-                onClick={() => onSelect(e)}
-                className="flex w-full items-center gap-3.5 px-5 py-3.5 text-left transition hover:bg-[--color-surface-sunk]"
-              >
-                <span className={`h-10 w-[3px] shrink-0 rounded-full ${CAT[e.category].rail}`} aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-[--color-ink]">
-                      {e.subjectName || subjectName(e.subjectId)}
+        <ul className="divide-y divide-line">
+          {entries.map((e) => {
+            const cat = CAT[e.category];
+            return (
+              <li key={e.id}>
+                <button
+                  onClick={() => onSelect(e)}
+                  className="flex w-full items-center gap-3.5 px-5 py-3.5 text-left transition hover:bg-surface-sunk"
+                >
+                  {/* Category rail. Inline hex so no build step can drop it.
+                      ⚠ w-0.75 is 3px only while the spacing scale stays on a
+                        4px base — if that ever changes, these rails silently
+                        change width. Logged as SM-5. */}
+                  <span
+                    className="h-10 w-0.75 shrink-0 rounded-full"
+                    style={{ backgroundColor: cat.hue }}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium text-ink">
+                        {e.subjectName || subjectName(e.subjectId)}
+                      </span>
+                      {e.isAfterHours && (
+                        <span className="shrink-0 text-xs text-watch" title="After hours">◷</span>
+                      )}
                     </span>
-                    {e.isAfterHours && (
-                      <span className="shrink-0 text-xs text-[--color-watch]" title="After hours">◷</span>
-                    )}
+                    <span className="tnum mt-0.5 block text-sm text-ink-muted">
+                      {formatTimeRange(e.start, e.end)}
+                      {e.weight > 1 && (
+                        <span className="text-ink-faint"> · counts as {e.weight}</span>
+                      )}
+                    </span>
                   </span>
-                  <span className="tnum mt-0.5 block text-sm text-[--color-ink-muted]">
-                    {formatTimeRange(e.start, e.end)}
-                    {e.weight > 1 && (
-                      <span className="text-[--color-ink-faint]"> · counts as {e.weight}</span>
-                    )}
+                  <span
+                    className="chip shrink-0 border"
+                    style={{
+                      backgroundColor: cat.soft,
+                      borderColor: cat.line,
+                      color: cat.hue,
+                    }}
+                  >
+                    {cat.label}
                   </span>
-                </span>
-                <span className={`chip shrink-0 border ${CAT[e.category].chip}`}>
-                  {CAT[e.category].label}
-                </span>
-              </button>
-            </li>
-          ))}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
@@ -543,15 +788,22 @@ function ActionSheet(props: {
   const { entry, day, onEdit, onDelete, onClose } = props;
   const [confirming, setConfirming] = useState(false);
 
+  const title = entry.subjectName || subjectName(entry.subjectId);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div className="sheet-scrim" onClick={onClose} aria-hidden />
       <div className="relative z-10 w-full max-w-2xl px-3 pb-3">
-        <div className="sheet">
+        <div
+          className="sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Options for ${title}`}
+        >
           <div className="sheet-head px-5 pb-4 pt-4">
             <div className="sheet-grip mb-4" aria-hidden />
-            <p className="display text-xl">{entry.subjectName || subjectName(entry.subjectId)}</p>
-            <p className="tnum mt-1 text-sm text-[--color-ink-muted]">
+            <p className="display text-xl">{title}</p>
+            <p className="tnum mt-1 text-sm text-ink-muted">
               {DAY_NAMES[day]} · {formatTimeRange(entry.start, entry.end)} · {CAT[entry.category].label}
             </p>
           </div>
@@ -559,7 +811,7 @@ function ActionSheet(props: {
           <div className="sheet-body p-3">
             {confirming ? (
               <>
-                <p className="px-2 py-3 text-center text-sm text-[--color-ink-soft]">
+                <p className="px-2 py-3 text-center text-sm text-ink-soft">
                   Remove this class from every week?
                 </p>
                 <div className="flex gap-2">
@@ -571,13 +823,13 @@ function ActionSheet(props: {
               <>
                 <button
                   onClick={onEdit}
-                  className="btn btn-quiet w-full justify-start px-4 text-[15px] text-[--color-ink]"
+                  className="btn btn-quiet w-full justify-start px-4 text-[15px] text-ink"
                 >
                   Edit class
                 </button>
                 <button
                   onClick={() => setConfirming(true)}
-                  className="btn btn-quiet w-full justify-start px-4 text-[15px] text-[--color-critical]"
+                  className="btn btn-quiet w-full justify-start px-4 text-[15px] text-critical"
                 >
                   Remove
                 </button>
@@ -597,6 +849,24 @@ function ActionSheet(props: {
 
 // -----------------------------------------------------------------------------
 // Add / edit class sheet
+//
+// ★ THE DERIVED-VALUE PATTERN. Read this before changing anything below.
+//
+// Four things the student picks — subject, type, start, end — are not four
+// independent choices. They form a chain:
+//
+//     subject  →  which types are allowed
+//     day+hours →  which starts are free
+//     start     →  which ends are legal
+//
+// Change a link and everything downstream may become invalid. The old code held
+// all four in state and used effects to repair them after the fact. That is a
+// render with bad data followed by a correction.
+//
+// Now: state holds the student's RAW CHOICE (which may be stale, and may be
+// null meaning "hasn't chosen"). The EFFECTIVE value is computed on every
+// render by checking that choice against the current options. Nothing can ever
+// paint an invalid time, because an invalid time never becomes a value.
 // -----------------------------------------------------------------------------
 
 function ClassSheet(props: {
@@ -613,9 +883,15 @@ function ClassSheet(props: {
 
   const [afterHours, setAfterHours] = useState(existing?.isAfterHours ?? false);
   const [subjectId, setSubjectId] = useState(existing?.subjectId ?? '');
-  const [category, setCategory] = useState<ClassCategory>(existing?.category ?? 'theory');
   const [weight, setWeight] = useState(existing?.weight ?? 1);
   const [error, setError] = useState<string | null>(null);
+
+  // ---- Raw choices. `null` means "the student has not overridden this". ----
+  const [startChoice, setStartChoice] = useState<TimeHHMM | null>(existing?.start ?? null);
+  const [endChoice, setEndChoice] = useState<TimeHHMM | null>(existing?.end ?? null);
+  const [categoryChoice, setCategoryChoice] = useState<ClassCategory | null>(
+    existing?.category ?? null,
+  );
 
   const subjects = useMemo(
     () => selectableSubjectsFor(year, settings.examSubjectsByYear, getEntOphthaInFinalYear()),
@@ -639,33 +915,31 @@ function ClassSheet(props: {
     });
   }, [windowStart, windowEnd, slot, occupied]);
 
-  const [start, setStart] = useState<TimeHHMM>(
-    () => existing?.start ?? suggestedStartFor(year, day) ?? settings.college.dayStart,
+  /**
+   * The suggested start is only a default — it applies when the student has
+   * made no choice of their own and there is no existing entry.
+   */
+  const suggested = useMemo(
+    () => suggestedStartFor(year, day) ?? settings.college.dayStart,
+    [year, day, settings.college.dayStart],
   );
 
-  useEffect(() => {
-    if (startOptions.length > 0 && !startOptions.includes(start)) setStart(startOptions[0]);
-  }, [startOptions, start]);
+  // ---- DERIVED. Valid by construction, on the very first render. ----
+  const start = resolveChoice(startChoice ?? suggested, startOptions, settings.college.dayStart);
 
   const endOptions = useMemo(
     () => generateEndTimes(start, windowEnd, slot, occupied),
     [start, windowEnd, slot, occupied],
   );
 
-  const [end, setEnd] = useState<TimeHHMM>(existing?.end ?? '');
-
-  useEffect(() => {
-    if (endOptions.length > 0 && !endOptions.includes(end)) setEnd(endOptions[0]);
-  }, [endOptions, end]);
+  const end = resolveChoice(endChoice, endOptions, '' as TimeHHMM);
 
   const allowedCats = useMemo(
     () => (subjectId ? categoriesForSubject(subjectId) : (['theory'] as ClassCategory[])),
     [subjectId],
   );
 
-  useEffect(() => {
-    if (subjectId && !allowedCats.includes(category)) setCategory(allowedCats[0]);
-  }, [subjectId, allowedCats, category]);
+  const category = resolveChoice(categoryChoice, allowedCats, 'theory');
 
   const dayFull = startOptions.length === 0 && !isEdit;
 
@@ -686,7 +960,11 @@ function ClassSheet(props: {
 
     if (report.hasConflict) {
       setError(report.message);
-      if (report.suggestedStart) setStart(report.suggestedStart);
+      // ⚠ Only takes effect if the suggestion is itself a free slot — which is
+      //   the only kind validateEntry ever returns. If that ever changes, the
+      //   derived resolver falls back to the first free start rather than
+      //   showing something impossible.
+      if (report.suggestedStart) setStartChoice(report.suggestedStart);
       return;
     }
 
@@ -704,23 +982,23 @@ function ClassSheet(props: {
     onClose();
   };
 
+  const heading = isEdit ? 'Edit class' : `Add to ${DAY_NAMES[day]}`;
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div className="sheet-scrim" onClick={onClose} aria-hidden />
       <div className="relative z-10 w-full max-w-2xl px-3 pb-3">
-        <div className="sheet">
+        <div className="sheet" role="dialog" aria-modal="true" aria-label={heading}>
           {/* ---- Header: fixed ---- */}
           <div className="sheet-head px-5 pb-4 pt-4">
             <div className="sheet-grip mb-4" aria-hidden />
-            <p className="display text-xl">
-              {isEdit ? 'Edit class' : `Add to ${DAY_NAMES[day]}`}
-            </p>
+            <p className="display text-xl">{heading}</p>
           </div>
 
           {/* ---- Body: the ONLY scrolling region ---- */}
           <div className="sheet-body space-y-5 px-5 py-5">
             {dayFull && (
-              <p className="rounded-[--radius-field] border border-[--color-watch-line] bg-[--color-watch-soft] px-4 py-3 text-sm text-[--color-watch]">
+              <p className="rounded-field border border-watch-line bg-watch-soft px-4 py-3 text-sm text-watch">
                 {DAY_NAMES[day]} is full within college hours. Extend your hours, or
                 switch on after-hours below.
               </p>
@@ -745,7 +1023,7 @@ function ClassSheet(props: {
                   {allowedCats.map((c) => (
                     <button
                       key={c}
-                      onClick={() => setCategory(c)}
+                      onClick={() => setCategoryChoice(c)}
                       aria-pressed={category === c}
                       className={`seg ${category === c ? 'seg-on' : ''}`}
                     >
@@ -756,11 +1034,17 @@ function ClassSheet(props: {
               </L>
             )}
 
+            {/* ⚠ These two selects are CONTROLLED BY DERIVED VALUES, not by
+                state. `value={start}` is the resolved, always-legal time;
+                onChange records the raw choice. If the options list shifts
+                underneath — because the student toggled after-hours, or the
+                start moved — the resolver silently drops an invalid pick on
+                the very next render. No effect, no flash of a clashing time. */}
             <div className="grid grid-cols-2 gap-3">
               <L label="Starts">
                 <select
                   value={start}
-                  onChange={(e) => setStart(e.target.value)}
+                  onChange={(e) => setStartChoice(e.target.value as TimeHHMM)}
                   className="field field-select tnum"
                 >
                   {startOptions.map((t) => (
@@ -771,7 +1055,7 @@ function ClassSheet(props: {
               <L label="Ends">
                 <select
                   value={end}
-                  onChange={(e) => setEnd(e.target.value)}
+                  onChange={(e) => setEndChoice(e.target.value as TimeHHMM)}
                   className="field field-select tnum"
                 >
                   {endOptions.map((t) => (
@@ -788,29 +1072,33 @@ function ClassSheet(props: {
                   value={weight}
                   onChange={(e) => setWeight(Math.max(1, Number(e.target.value) || 1))}
                   className="field tnum w-24"
+                  aria-label="How many classes this counts as in the register"
                 />
-                <span className="text-sm text-[--color-ink-muted]">
+                <span className="text-sm text-ink-muted">
                   {weight === 1 ? 'one class' : `${weight} classes in the register`}
                 </span>
               </div>
             </L>
 
             {settings.college.allowAfterHours && (
-              <label className="flex cursor-pointer items-center justify-between gap-4 rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3">
-                <span className="text-sm font-medium text-[--color-ink-soft]">
+              <label className="flex cursor-pointer items-center justify-between gap-4 rounded-field border border-line bg-surface-sunk px-4 py-3">
+                <span className="text-sm font-medium text-ink-soft">
                   Show times outside college hours
                 </span>
                 <input
                   type="checkbox"
                   checked={afterHours}
                   onChange={(e) => setAfterHours(e.target.checked)}
-                  className="h-6 w-6 shrink-0 rounded-md accent-[--color-brand]"
+                  className="h-6 w-6 shrink-0 rounded-md accent-brand"
                 />
               </label>
             )}
 
             {error && (
-              <p className="rounded-[--radius-field] border border-[--color-critical-line] bg-[--color-critical-soft] px-4 py-3 text-sm text-[--color-critical]">
+              <p
+                role="alert"
+                className="rounded-field border border-critical-line bg-critical-soft px-4 py-3 text-sm text-critical"
+              >
                 {error}
               </p>
             )}
@@ -822,7 +1110,7 @@ function ClassSheet(props: {
             <button
               onClick={handleSave}
               disabled={!subjectId || !start || !end}
-              className="btn btn-primary flex-[2]"
+              className="btn btn-primary flex-2"
             >
               {isEdit ? 'Save changes' : 'Add class'}
             </button>
@@ -838,7 +1126,7 @@ function ClassSheet(props: {
 // Shared label
 // -----------------------------------------------------------------------------
 
-function L(props: { label: string; children: React.ReactNode }) {
+function L(props: { label: string; children: ReactNode }) {
   return (
     <div>
       <span className="eyebrow mb-2 block">{props.label}</span>

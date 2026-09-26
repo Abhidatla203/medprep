@@ -1,19 +1,19 @@
-'use client';
+﻿'use client';
 
 // =============================================================================
 // app/attendance/setup/PostingsPanel.tsx
 // -----------------------------------------------------------------------------
-// Clinical postings. A posting is a DATE RANGE — "Surgery, 1 Oct to 28 Oct,
-// 9am to 1pm, Mon-Sat" — not a weekly timetable slot.
+// Clinical postings. A posting is a DATE RANGE â€” "Surgery, 1 Oct to 28 Oct,
+// 9am to 1pm, Mon-Sat" â€” not a weekly timetable slot.
 //
 // The posting record is the SINGLE SOURCE OF TRUTH. Sessions derive from it on
 // demand and are never stored. Change the end date and every derived session
-// updates for free — no backfill, no orphaned marks.
+// updates for free â€” no backfill, no orphaned marks.
 //
 // Conflicts are REPORTED, not blocked. A posting overlapping a lecture happens
 // constantly in a real medical college; the student decides what took place.
 //
-// ⚠ onSheetChange
+// âš  onSheetChange
 //   Raised while this panel's sheet is open so the page can stand SaveBar down.
 //   Two pinned footers on screen at once reads as a bug.
 // =============================================================================
@@ -77,8 +77,8 @@ export default function PostingsPanel(props: {
 
       {postings.length === 0 ? (
         <div className="card p-5">
-          <p className="text-sm text-[--color-ink-muted]">
-            No postings yet. Add one when you start a ward rotation — every day
+          <p className="text-sm text-ink-muted">
+            No postings yet. Add one when you start a ward rotation â€” every day
             between the start and end dates is generated automatically.
           </p>
         </div>
@@ -131,23 +131,23 @@ function PostingRow(props: { posting: Posting; onSelect: () => void }) {
       }`}
     >
       <span
-        className="h-11 w-[3px] shrink-0 rounded-full bg-[--color-clinical]"
+        className="h-11 w-[3px] shrink-0 rounded-full bg-clinical"
         aria-hidden
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold text-[--color-ink]">
+          <span className="truncate text-sm font-semibold text-ink">
             {posting.subjectName || subjectName(posting.subjectId)}
           </span>
           {active && <span className="chip chip-safe shrink-0">Running now</span>}
         </span>
-        <span className="tnum mt-0.5 block text-sm text-[--color-ink-soft]">
-          {formatDateDMY(posting.startDate)} – {formatDateDMY(posting.endDate)}
+        <span className="tnum mt-0.5 block text-sm text-ink-soft">
+          {formatDateDMY(posting.startDate)} â€“ {formatDateDMY(posting.endDate)}
         </span>
-        <span className="tnum mt-0.5 block text-sm text-[--color-ink-faint]">
-          {formatTimeRange(posting.start, posting.end)} · {dayCount}{' '}
+        <span className="tnum mt-0.5 block text-sm text-ink-faint">
+          {formatTimeRange(posting.start, posting.end)} Â· {dayCount}{' '}
           {dayCount === 1 ? 'day' : 'days'}
-          {posting.weight > 1 && ` · counts as ${posting.weight} each`}
+          {posting.weight > 1 && ` Â· counts as ${posting.weight} each`}
         </span>
       </span>
       {ended && <span className="chip chip-neutral shrink-0">Ended</span>}
@@ -195,7 +195,7 @@ function PostingSheet(props: {
 
   /**
    * Live conflict check, WARNING only. A posting clashing with a lecture is a
-   * real situation — the student resolves it by marking what actually happened,
+   * real situation â€” the student resolves it by marking what actually happened,
    * not by being blocked here.
    */
   const conflicts = useMemo(() => {
@@ -284,7 +284,7 @@ function PostingSheet(props: {
                 onChange={(e) => setSubjectId(e.target.value)}
                 className="field field-select"
               >
-                <option value="">Choose a department…</option>
+                <option value="">Choose a departmentâ€¦</option>
                 {CLINICAL_SUBJECTS.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -346,42 +346,42 @@ function PostingSheet(props: {
                   onChange={(e) => setWeight(Math.max(1, Number(e.target.value) || 1))}
                   className="field tnum w-24"
                 />
-                <span className="text-sm text-[--color-ink-muted]">
+                <span className="text-sm text-ink-muted">
                   {weight === 1 ? 'one class' : `${weight} classes in the register`}
                 </span>
               </div>
             </L>
 
             {dayCount > 0 && (
-              <p className="rounded-[--radius-field] border border-[--color-line] bg-[--color-surface-sunk] px-4 py-3 text-sm text-[--color-ink-soft]">
+              <p className="rounded-field border border-line bg-surface-sunk px-4 py-3 text-sm text-ink-soft">
                 Generates{' '}
-                <span className="tnum font-semibold text-[--color-ink]">{dayCount}</span>{' '}
+                <span className="tnum font-semibold text-ink">{dayCount}</span>{' '}
                 {dayCount === 1 ? 'session' : 'sessions'}
-                {weight > 1 && ` — ${dayCount * weight} classes in the register`}.
+                {weight > 1 && ` â€” ${dayCount * weight} classes in the register`}.
               </p>
             )}
 
             {conflicts.length > 0 && (
-              <div className="rounded-[--radius-field] border border-[--color-watch-line] bg-[--color-watch-soft] px-4 py-3">
-                <p className="text-sm font-semibold text-[--color-watch]">
+              <div className="rounded-field border border-watch-line bg-watch-soft px-4 py-3">
+                <p className="text-sm font-semibold text-watch">
                   Clashes on {conflicts.length}{' '}
                   {conflicts.length === 1 ? 'day' : 'days'}
                 </p>
-                <p className="mt-1 text-sm text-[--color-watch]">
-                  This overlaps existing classes. Still fine to save — mark
+                <p className="mt-1 text-sm text-watch">
+                  This overlaps existing classes. Still fine to save â€” mark
                   whichever actually happened on the day.
                 </p>
               </div>
             )}
 
             {error && (
-              <p className="rounded-[--radius-field] border border-[--color-critical-line] bg-[--color-critical-soft] px-4 py-3 text-sm text-[--color-critical]">
+              <p className="rounded-field border border-critical-line bg-critical-soft px-4 py-3 text-sm text-critical">
                 {error}
               </p>
             )}
 
             {isEdit && (
-              <div className="border-t border-[--color-line] pt-4">
+              <div className="border-t border-line pt-4">
                 {confirming ? (
                   <div className="flex gap-2">
                     <button
@@ -403,7 +403,7 @@ function PostingSheet(props: {
                 ) : (
                   <button
                     onClick={() => setConfirming(true)}
-                    className="btn btn-quiet w-full text-[--color-critical]"
+                    className="btn btn-quiet w-full text-critical"
                   >
                     Delete this posting
                   </button>
@@ -420,7 +420,7 @@ function PostingSheet(props: {
             <button
               onClick={handleSave}
               disabled={!subjectId}
-              className="btn btn-primary flex-[2]"
+              className="btn btn-primary flex-2"
             >
               {isEdit ? 'Save changes' : 'Add posting'}
             </button>
